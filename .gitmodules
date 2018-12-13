@@ -1,0 +1,3 @@
+[submodule "lsg"]
+	path = lsg
+	url = https://github.com/lhog/spring-luashader-goodies.git

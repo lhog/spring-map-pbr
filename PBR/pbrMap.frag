@@ -416,7 +416,6 @@ void main() {
 	{
 		// GroundMaterialAmbientDiffuseColor * LightAmbientDiffuseColor
 		vec4 shadeInt = GetShadeInt(cosAngleDiffuse, shadowCoeff, diffuseCol.a);
-		shadeInt = vec4(1.0);
 
 		gl_FragColor.rgb = (diffuseCol.rgb + detailCol.rgb) * shadeInt.rgb;
 		gl_FragColor.a = shadeInt.a;

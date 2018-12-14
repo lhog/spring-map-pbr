@@ -29,6 +29,7 @@ local function GetFlagsTexturesUniforms()
 	local mapInfo = VFS.Include("mapinfo.lua", nil, VFS.MAP)
 	--GG.TableEcho(mapinfo, "mapinfo")
 	local mapResources = mapInfo.resources
+	local mapLighting = mapInfo.lighting
 	local mapSplats = mapInfo.splats
 	local mapWater = mapInfo.water
 	local mapPBR = (mapInfo.custom or {}).pbr
@@ -53,7 +54,7 @@ local function GetFlagsTexturesUniforms()
 		--elseif 	k ==  "splatDetailTex" then
 
 		elseif 	k ==  string.lower("splatDistrTex") then
-		
+
 		elseif 	k ==  string.lower("skyReflectModTex") then
 			table.insert(definitions, "SMF_SKY_REFLECTIONS")
 		elseif 	k ==  string.lower("splatDetailNormalTex1") then
@@ -141,6 +142,20 @@ local function GetFlagsTexturesUniforms()
 		end
 	end
 
+	for k, v in pairs(mapLighting) do
+		if 		k == string.lower("groundAmbientColor") then
+			uniformsFloat["groundAmbientColor"] = v
+		elseif 	k == string.lower("groundDiffuseColor") then
+			uniformsFloat["groundDiffuseColor"] = v
+		elseif	k == string.lower("groundSpecularColor") then
+			uniformsFloat["groundSpecularColor"] = v
+		elseif	k == string.lower("groundSpecularExponent") then
+			uniformsFloat["groundSpecularExponent"] = v
+		elseif	k == string.lower("groundShadowDensity") then
+			uniformsFloat["groundShadowDensity"] = v
+		end
+	end
+
 	if gl.HasExtension("GL_ARB_texture_non_power_of_two") then
 		uniformsFloat["normalTexGen"] = { 1.0/Game.mapSizeX, 1.0/Game.mapSizeZ }
 	else
@@ -202,7 +217,7 @@ function gadget:Initialize()
 
 	}, "PBR Map Shader (Forward)")
 	shaderObj:Initialize()
-	
+
 	Spring.SetMapShader(shaderObj:GetHandle(), 0)
 end
 

@@ -254,7 +254,7 @@ end
 function gadget:Update(dt)
 	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
 	if (newSunX ~= oldSunPos[1] or newSunY ~= oldSunPos[2] or newSunZ ~= oldSunPos[3]) then
-		Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
+		--Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
 		oldSunPos = { newSunX, newSunY, newSunZ }
 		updateSunPos = true
 	end

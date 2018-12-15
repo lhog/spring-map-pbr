@@ -63,7 +63,8 @@ in Data {
 #endif
 
 #ifdef HAVE_SHADOWS
-	uniform sampler2DShadow shadowTex;
+	//uniform sampler2DShadow shadowTex;
+	uniform sampler2D shadowTex;
 	uniform mat4 shadowMat;
 	uniform vec4 shadowParams;
 #endif
@@ -408,7 +409,10 @@ void main() {
 			vertexShadowPos.xy += shadowParams.xy;
 
 		// same as ARB shader: shadowCoeff = 1 - (1 - shadowCoeff) * groundShadowDensity
-		shadowCoeff = mix(1.0, shadow2DProj(shadowTex, vertexShadowPos).r, groundShadowDensity);
+		//shadowCoeff = mix(1.0, textureProj(shadowTex, vertexShadowPos), groundShadowDensity);
+		float bias = 0.0;
+		float shadowTexResult = float(textureProj(shadowTex, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w);
+		shadowCoeff = mix(1.0, shadowTexResult, groundShadowDensity);
 	}
 	#endif
 

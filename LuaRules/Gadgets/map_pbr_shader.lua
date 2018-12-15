@@ -265,7 +265,7 @@ function gadget:UnsyncedHeightMapUpdate()
 end
 
 
-local function UpdateAllUniforms()
+local function UpdateSomeUniforms()
 
 	if firstTime then
 		--blabla
@@ -280,8 +280,6 @@ local function UpdateAllUniforms()
 		end
 
 		if updateSunPos then
-			fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
-			fwdShaderObj:SetUniformFloatAlways("shadowParams", gl.GetShadowMapParams())
 			local sunPosX, sunPosY, sunPosZ = gl.GetSun("pos")
 			fwdShaderObj:SetUniformFloatAlways("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
 			updateSunPos = false
@@ -340,10 +338,12 @@ local function BindTextures()
 	gl.Texture(18, "$ssmf_splat_normals:3")
 end
 
-function gadget:DrawWorldPreUnit()
+-- Shadow matrix and shadow params are wrong here!!!
+-- Use gadget:DrawWorldShadow() for shadows instead
+function gadget:DrawGenesis()
 	if fwdShaderObjValid then
 		CallAsTeam(Spring.GetMyTeamID(),  function()
-			UpdateAllUniforms()
+			UpdateSomeUniforms()
 			BindTextures()
 		end)
 	end
@@ -380,10 +380,16 @@ function gadget:GotChatMsg(msg, player)
 	end
 end
 
---shadow matrix and shadow params are wrong here!!!
-function gadget:DrawGenesis()
+
+function gadget:DrawWorldShadow()
+	fwdShaderObj:ActivateWith( function()
+		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
+		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
+	end)
 
 end
+
+
 
 function gadget:Shutdown()
 	if fwdShaderObjValid then

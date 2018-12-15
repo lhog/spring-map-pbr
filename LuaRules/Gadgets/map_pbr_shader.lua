@@ -5,8 +5,8 @@ function gadget:GetInfo()
 		author    = "ivand",
 		date      = "2018-2019",
 		license   = " ",
-		layer     = 1,
-		enabled   = true
+		layer     = 1000,
+		enabled   = true,
 	}
 end
 
@@ -44,27 +44,31 @@ local function GetFlagsTexturesUniforms()
 	table.insert(definitions, "#version 150 compatibility")
 	table.insert(definitions, "#define NOSPRING")
 
-	local hasSplatDetailNormalTex = false
+	local hasDNTS = false
+	local hasSplats = false
+	local hasSplatsDistr = false
 
 	--GG.TableEcho(mapResources, "mapResources")
 
 	for k, v in pairs(mapResources) do
 		if 		k == string.lower("detailTex") then
-
-		--elseif 	k ==  "splatDetailTex" then
-
+			--unconditional ...
+		elseif 	k ==  "splatDetailTex" then
+			hasSplats = true
+		elseif 	k ==  string.lower("specularTex") then
+			table.insert(definitions, "#define SMF_SPECULAR_LIGHTING")
 		elseif 	k ==  string.lower("splatDistrTex") then
-
+			hasSplatsDistr = true
 		elseif 	k ==  string.lower("skyReflectModTex") then
-			table.insert(definitions, "SMF_SKY_REFLECTIONS")
+			table.insert(definitions, "#define SMF_SKY_REFLECTIONS")
 		elseif 	k ==  string.lower("splatDetailNormalTex1") then
-			hasSplatDetailNormalTex = true
+			hasDNTS = true
 		elseif 	k ==  string.lower("splatDetailNormalTex2") then
-			hasSplatDetailNormalTex = true
+			hasDNTS = true
 		elseif 	k ==  string.lower("splatDetailNormalTex3") then
-			hasSplatDetailNormalTex = true
+			hasDNTS = true
 		elseif 	k ==  string.lower("splatDetailNormalTex4") then
-			hasSplatDetailNormalTex = true
+			hasDNTS = true
 		elseif 	k ==  string.lower("splatDetailNormalDiffuseAlpha") then
 			if v and v == 1.0 then
 				table.insert(definitions, "#define SMF_DETAIL_NORMAL_DIFFUSE_ALPHA")
@@ -81,7 +85,7 @@ local function GetFlagsTexturesUniforms()
 	-- HAVE_INFOTEX
 	if Spring.GetMapDrawMode() ~= nil then
 		table.insert(definitions, "#define HAVE_INFOTEX")
-		uniformsFloat["infoTexGen"] = { 1.0 / (pwr2mapx * Game.squareSize), 1.0 / (pwr2mapy * Game.squareSize) }
+		uniformsFloat["infoTexGen"] = { 1.0 / pwr2mapx, 1.0 / pwr2mapy }
 	end
 
 	-- HAVE_SHADOWS
@@ -95,7 +99,6 @@ local function GetFlagsTexturesUniforms()
 		table.insert(definitions, "#define SMF_VOID_WATER")
 	else
 		table.insert(definitions, "#define SMF_WATER_ABSORPTION")
-
 	end
 
 	-- SMF_VOID_GROUND
@@ -103,14 +106,13 @@ local function GetFlagsTexturesUniforms()
 		table.insert(definitions, "#define SMF_VOID_GROUND")
 	end
 
-	-- SMF_SPECULAR_LIGHTING
-	-- ^^ not supported, replaced by PBR, dummy texture should be provided
-
 	-- SMF_DETAIL_TEXTURE_SPLATTING
-	-- ^^ not supported
+	if hasSplats and hasSplatsDistr then
+		table.insert(definitions, "#define SMF_DETAIL_TEXTURE_SPLATTING")
+	end
 
 	-- SMF_DETAIL_NORMAL_TEXTURE_SPLATTING
-	if hasSplatDetailNormalTex then
+	if hasDNTS and hasSplatsDistr then
 		table.insert(definitions, "#define SMF_DETAIL_NORMAL_TEXTURE_SPLATTING")
 	end
 
@@ -144,15 +146,15 @@ local function GetFlagsTexturesUniforms()
 
 	for k, v in pairs(mapLighting) do
 		if 		k == string.lower("groundAmbientColor") then
-			uniformsFloat["groundAmbientColor"] = v
+			uniformsFloat["groundAmbientColor"] = { gl.GetSun("ambient") }
 		elseif 	k == string.lower("groundDiffuseColor") then
-			uniformsFloat["groundDiffuseColor"] = v
+			uniformsFloat["groundDiffuseColor"] = { gl.GetSun("diffuse") }
 		elseif	k == string.lower("groundSpecularColor") then
-			uniformsFloat["groundSpecularColor"] = v
+			uniformsFloat["groundSpecularColor"] = { gl.GetSun("specular") }
 		elseif	k == string.lower("groundSpecularExponent") then
-			uniformsFloat["groundSpecularExponent"] = v
+			uniformsFloat["groundSpecularExponent"] = gl.GetSun("specularExponent")
 		elseif	k == string.lower("groundShadowDensity") then
-			uniformsFloat["groundShadowDensity"] = v
+			uniformsFloat["groundShadowDensity"] = gl.GetSun("shadowDensity")
 		end
 	end
 
@@ -164,7 +166,7 @@ local function GetFlagsTexturesUniforms()
 
 	uniformsFloat["specularTexGen"] = { 1.0/Game.mapSizeX, 1.0/Game.mapSizeZ }
 
-	uniformsFloat["infoTexIntensityMul"] = ((Spring.GetMapDrawMode() == "metal") and 1.0 or 0.0) + 1.0
+	--uniformsFloat["infoTexIntensityMul"] = ((Spring.GetMapDrawMode() == "metal") and 1.0 or 0.0) + 1.0
 
 	local texUnitUniforms = {
 		diffuseTex = 0,
@@ -178,6 +180,7 @@ local function GetFlagsTexturesUniforms()
 		blendNormalsTex = 11,
 		lightEmissionTex = 12,
 		parallaxHeightTex = 13,
+		infoTex = 14,
 		splatDetailNormalTex1 = 15,
 		splatDetailNormalTex2 = 16,
 		splatDetailNormalTex3 = 17,
@@ -195,8 +198,33 @@ local function GetFlagsTexturesUniforms()
 	return definitions, uniformsFloat, uniformsInt, textures
 end
 
-local shaderObj
+
+--  Gadget Global Vars  --
+local fwdShaderObjValid
+local fwdShaderObj
+
+local updateHeights
+
+local oldSunPos = {-1, -1, -1}
+local updateSunPos
+
+local firstTime
+-- /Gadget Global Vars/ --
+
+local function InitGlobalVars()
+	fwdShaderObjValid = false
+	fwdShaderObj = nil
+
+	firstTime = true
+	updateHeights = true
+
+	oldSunPos = {-1, -1, -1}
+	updateSunPos = false
+end
+
 function gadget:Initialize()
+
+	InitGlobalVars()
 
 	local definitions, uniformsFloat, uniformsInt, textures = GetFlagsTexturesUniforms()
 
@@ -208,7 +236,7 @@ function gadget:Initialize()
 
 	--Spring.Echo(vertCode, fragCode)
 
-	shaderObj = LuaShader({
+	fwdShaderObj = LuaShader({
 		definitions = definitions,
 		vertex = vertCode,
 		fragment = fragCode,
@@ -216,65 +244,154 @@ function gadget:Initialize()
 		uniformInt = uniformsInt,
 
 	}, "PBR Map Shader (Forward)")
-	shaderObj:Initialize()
+	fwdShaderObjValid = fwdShaderObj:Initialize()
 
-	Spring.SetMapShader(shaderObj:GetHandle(), 0)
+	if fwdShaderObjValid then
+		Spring.SetMapShader(fwdShaderObj:GetHandle(), 0)
+	end
 end
 
-local oldSunPos = {-1, -1, -1}
-local updateSunPos
 function gadget:Update(dt)
 	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
 	if (newSunX ~= oldSunPos[1] or newSunY ~= oldSunPos[2] or newSunZ ~= oldSunPos[3]) then
+		Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
 		oldSunPos = { newSunX, newSunY, newSunZ }
 		updateSunPos = true
 	end
 end
 
-local updateHeights = true
 function gadget:UnsyncedHeightMapUpdate()
 	updateHeights = true
 end
 
-function gadget:DrawWorldPreUnit()
 
-end
+local function UpdateAllUniforms()
 
-local firstTime = true
-function gadget:DrawGenesis()
 	if firstTime then
 		--blabla
+		firstTime = false
 	end
 
-	if updateHeights then
-		shaderObj:ActivateWith( function()
-			CallAsTeam(Spring.GetMyTeamID(),  function()
-				local minH, maxH = Spring.GetGroundExtremes()
-				shaderObj:SetUniformFloat("mapHeights", minH, maxH)
-			end)
-		end)
-		updateHeights = false
-	end
+	fwdShaderObj:ActivateWith( function()
 
-	if updateSunPos then
-		Spring.Echo("updateSunPos!!!")
-		shaderObj:ActivateWith( function()
-			shaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
-			shaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
+		if updateHeights then
+			fwdShaderObj:SetUniformFloat("mapHeights", Spring.GetGroundExtremes())
+			updateHeights = false
+		end
+
+		if updateSunPos then
+			fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
+			fwdShaderObj:SetUniformFloatAlways("shadowParams", gl.GetShadowMapParams())
 			local sunPosX, sunPosY, sunPosZ = gl.GetSun("pos")
-			shaderObj:SetUniformFloat("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
+			fwdShaderObj:SetUniformFloatAlways("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
+			updateSunPos = false
+		end
+
+		local drawMode = Spring.GetMapDrawMode() or "nil"
+		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)
+		--fwdShaderObj:SetUniformFloat("cameraPos", Spring.GetCameraPosition())
+	end)
+end
+
+local function BindTextures()
+	-- diffuseTex = 0,
+	-- ^^ Is bound by engine
+
+	-- detailTex = 2,
+	gl.Texture(2, "$detail")
+
+	-- shadowTex = 4,
+	gl.Texture(4, "$shadow")
+
+	-- normalsTex = 5,
+	gl.Texture(5, "$normals")
+
+	-- specularTex = 6,
+	gl.Texture(6, "$ssmf_specular")
+
+	-- splatDetailTex = 7,
+	gl.Texture(7, "$ssmf_splat_detail")
+
+	-- splatDistrTex = 8,
+	gl.Texture(8, "$ssmf_splat_distr")
+
+	-- skyReflectModTex = 10,
+	gl.Texture(10, "$sky_reflection")
+
+	-- blendNormalsTex = 11,
+	gl.Texture(11, "$ssmf_normals")
+
+	-- lightEmissionTex = 12,
+	gl.Texture(12, "$ssmf_emission")
+
+	-- parallaxHeightTex = 13,
+	gl.Texture(13, "$ssmf_parallax")
+
+	-- infoTex = 14,
+	gl.Texture(14, "$info")
+
+	-- splatDetailNormalTex1 = 15,
+	gl.Texture(15, "$ssmf_splat_normals:0")
+	-- splatDetailNormalTex2 = 16,
+	gl.Texture(16, "$ssmf_splat_normals:1")
+	-- splatDetailNormalTex3 = 17,
+	gl.Texture(17, "$ssmf_splat_normals:2")
+	-- splatDetailNormalTex4 = 18,
+	gl.Texture(18, "$ssmf_splat_normals:3")
+end
+
+function gadget:DrawWorldPreUnit()
+	if fwdShaderObjValid then
+		CallAsTeam(Spring.GetMyTeamID(),  function()
+			UpdateAllUniforms()
+			BindTextures()
 		end)
-		updateSunPos = false
+	end
+end
+
+function gadget:GotChatMsg(msg, player)
+	local pbrmapFound = string.find(msg, "pbrmap")
+	if pbrmapFound == nil then
+		pbrmapFound = string.find(msg, "mappbr")
+	end
+	local pbrmapNumStart, pbrmapNumEnd = string.find(msg, "%d+")
+	local pbrmapNum
+	if pbrmapNumStart then
+		pbrmapNum = string.sub(msg, pbrmapNumStart, pbrmapNumEnd)
 	end
 
-	shaderObj:ActivateWith( function()
-		local cameraX, cameraY, cameraZ = Spring.GetCameraPosition()
-		shaderObj:SetUniformFloat("cameraPos", cameraX, cameraY, cameraZ)
-	end)
+	local pbrmapReloadFound = string.find(msg, "reload")
+
+	--Spring.Echo(msg, pbrmapFound, pbrmapNumStart, pbrmapNumEnd, pbrmapNum, pbrmapReloadFound)
+	if pbrmapFound and (pbrmapNum or pbrmapReloadFound) then
+		if 		pbrmapNum == "0" then
+			Spring.Echo("Disabling map PBR")
+			Spring.SetMapShader(0, 0)
+		elseif	pbrmapNum == "1" then
+			if fwdShaderObjValid then
+				Spring.Echo("Enabling map PBR")
+				Spring.SetMapShader(fwdShaderObj:GetHandle(), 0)
+			end
+		elseif	pbrmapReloadFound then
+			Spring.Echo("Reloading map PBR gadget")
+			gadget:Shutdown()
+			gadget:Initialize()
+		end
+	end
+end
+
+--shadow matrix and shadow params are wrong here!!!
+function gadget:DrawGenesis()
 
 end
 
 function gadget:Shutdown()
-	shaderObj:Finalize()
-	Spring.SetMapShader(0, 0)
+	if fwdShaderObjValid then
+		fwdShaderObj:Finalize()
+
+		fwdShaderObjValid = false
+		fwdShaderObj = nil
+
+		Spring.SetMapShader(0, 0)
+	end
 end

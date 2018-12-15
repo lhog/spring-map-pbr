@@ -9,16 +9,14 @@ out Data {
 	vec3 halfDir;
 	float fogFactor;
 	vec4 vertexWorldPos;
-	vec2 diffuseTexCoords;	
+	vec2 diffuseTexCoords;
 };
 
 void main() {
 	// calc some lighting variables
-	//vec3 viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
+	vec3 viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
 
-	//viewDir = normalize(viewDir - gl_Vertex.xyz);
-	vec3 viewDir = normalize(cameraPos - gl_Vertex.xyz);
-	
+	viewDir = normalize(viewDir - gl_Vertex.xyz);
 	halfDir = normalize(lightDir.xyz + viewDir);
 
 	vertexWorldPos = gl_Vertex;

@@ -49,7 +49,7 @@ in Data {
 	vec3 halfDir;
 	float fogFactor;
 	vec4 vertexWorldPos;
-	vec2 diffuseTexCoords;	
+	vec2 diffuseTexCoords;
 };
 
 #ifdef HAVE_INFOTEX

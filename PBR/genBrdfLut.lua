@@ -11,12 +11,12 @@ local function new(class, textureSize)
 	}, class)
 end
 
-local genBrdfLut = setmetatable({}, {
+local GenBrdfLut = setmetatable({}, {
 	__call = function(self, ...) return new(self, ...) end,
 	})
-genBrdfLut.__index = genBrdfLut
+GenBrdfLut.__index = GenBrdfLut
 
-function genBrdfLut:Initialize()
+function GenBrdfLut:Initialize()
 	self.brdfTexture = gl.CreateTexture(self.textureSize, self.textureSize, {
 		format = GL_RG16F,
 		border = false,
@@ -27,7 +27,7 @@ function genBrdfLut:Initialize()
 	})
 
 	if not self.brdfTexture then
-		Spring.Echo("genBrdfLut: [%s] brdfTexture creation error:\n%s")
+		Spring.Echo("GenBrdfLut: [%s] brdfTexture creation error:\n%s")
 	end
 
 	self.brdfFBO = gl.CreateFBO({
@@ -36,12 +36,12 @@ function genBrdfLut:Initialize()
 	})
 
 	if not self.brdfFBO then
-		Spring.Echo("genBrdfLut: [%s] FBO creation error:\n%s")
+		Spring.Echo("GenBrdfLut: [%s] FBO creation error:\n%s")
 	end
 
 	self.brdfShader = gl.CreateShader({
-		vertex = VFS.LoadFile("PBR/genBrdfLut.vert"),
-		fragment = VFS.LoadFile("PBR/genBrdfLut.frag"),
+		vertex = VFS.LoadFile("PBR/GenBrdfLut.vert"),
+		fragment = VFS.LoadFile("PBR/GenBrdfLut.frag"),
 		uniformInt = {
 			texSize = {self.textureSize, self.textureSize},
 		},
@@ -50,18 +50,18 @@ function genBrdfLut:Initialize()
 	local shLog = gl.GetShaderLog() or ""
 
 	if not self.brdfShader then
-		Spring.Echo(string.format("genBrdfLut: [%s] shader errors:\n%s", "genBrdfLut", shLog))
+		Spring.Echo(string.format("GenBrdfLut: [%s] shader errors:\n%s", "GenBrdfLut", shLog))
 		return false
 	elseif shLog ~= "" then
-		Spring.Echo(string.format("genBrdfLut: [%s] shader warnings:\n%s", "genBrdfLut", shLog))
+		Spring.Echo(string.format("GenBrdfLut: [%s] shader warnings:\n%s", "GenBrdfLut", shLog))
 	end
 end
 
-function genBrdfLut:GetTexture()
+function GenBrdfLut:GetTexture()
 	return self.brdfTexture
 end
 
-function genBrdfLut:Execute(isScreenSpace)
+function GenBrdfLut:Execute(isScreenSpace)
 	if gl.IsValidFBO(self.brdfFBO) then
 		gl.ActiveShader(self.brdfShader, function ()
 			gl.ActiveFBO(self.brdfFBO, function()
@@ -78,10 +78,10 @@ function genBrdfLut:Execute(isScreenSpace)
 	end
 end
 
-function genBrdfLut:Finalize()
+function GenBrdfLut:Finalize()
 	gl.DeleteFBO(self.brdfFBO)
 	gl.DeleteTexture(self.brdfTexture)
 	gl.DeleteShader(self.brdfShader)
 end
 
-return genBrdfLut
+return GenBrdfLut

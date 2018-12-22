@@ -15,6 +15,7 @@ if (gadgetHandler:IsSyncedCode()) then
 end
 
 local LuaShader = VFS.Include("libs/lsg/LuaShader.lua")
+local GenBRDFLUT = VFS.Include("PBR/GenBrdfLut.lua")
 
 local function GetNextPowerOf2(tbl)
 	local npot = {}
@@ -209,6 +210,7 @@ local oldSunPos = {-1, -1, -1}
 local updateSunPos
 
 local firstTime
+local genBrdfLut
 -- /Gadget Global Vars/ --
 
 local function InitGlobalVars()
@@ -220,11 +222,39 @@ local function InitGlobalVars()
 
 	oldSunPos = {-1, -1, -1}
 	updateSunPos = false
+
+	genBRDFLUT = nil
+end
+
+local function CheckIfEnabled()
+	local mapInfo = VFS.Include("mapinfo.lua", nil, VFS.MAP)
+	local mapPBR = (mapInfo.custom or {}).pbr
+	if not mapPBR then
+		return false
+	end
+
+	if not mapPBR.enabled then
+		return false
+	end
+
+	return true
 end
 
 function gadget:Initialize()
 
+	if not CheckIfEnabled() then
+		Spring.Echo("Map PBR is not enabled on this map, unloading gadget")
+		gadgetHandler:RemoveGadget()
+		return
+	else
+		Spring.Echo("Map PBR is enabled on this map, loading gadget")
+	end
+
 	InitGlobalVars()
+
+	local BRDFLUT_TEXDIM = 512 --512 is BRDF LUT texture size
+	genBrdfLut = GenBRDFLUT(BRDFLUT_TEXDIM)
+	genBrdfLut:Initialize()
 
 	local definitions, uniformsFloat, uniformsInt, textures = GetFlagsTexturesUniforms()
 
@@ -266,9 +296,8 @@ end
 
 
 local function UpdateSomeUniforms()
-
 	if firstTime then
-		--blabla
+		genBrdfLut:Execute(false)
 		firstTime = false
 	end
 
@@ -338,17 +367,6 @@ local function BindTextures()
 	gl.Texture(18, "$ssmf_splat_normals:3")
 end
 
--- Shadow matrix and shadow params are wrong here!!!
--- Use gadget:DrawWorldShadow() for shadows instead
-function gadget:DrawGenesis()
-	if fwdShaderObjValid then
-		CallAsTeam(Spring.GetMyTeamID(),  function()
-			UpdateSomeUniforms()
-			BindTextures()
-		end)
-	end
-end
-
 function gadget:GotChatMsg(msg, player)
 	local pbrmapFound = string.find(msg, "pbrmap")
 	if pbrmapFound == nil then
@@ -376,12 +394,14 @@ function gadget:GotChatMsg(msg, player)
 			Spring.Echo("Reloading map PBR gadget")
 			gadget:Shutdown()
 			gadget:Initialize()
+			--gadgetHandler:ToggleGadget(gadget:GetInfo().name)
 		end
 	end
 end
 
 
 function gadget:DrawWorldShadow()
+	--Spring.Echo("gadget:DrawWorldShadow()")
 	fwdShaderObj:ActivateWith( function()
 		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
 		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
@@ -389,9 +409,23 @@ function gadget:DrawWorldShadow()
 
 end
 
+-- Shadow matrix and shadow params are wrong here!!!
+-- Use gadget:DrawWorldShadow() for shadows instead
+-- TODO make sure DrawGroundPreForward is mapped
+function gadget:DrawGroundPreForward()
+	if fwdShaderObjValid then
+		CallAsTeam(Spring.GetMyTeamID(),  function()
+			UpdateSomeUniforms()
+			--BindTextures()
+			-- ^^ somehow bound by engine
+		end)
+	end
+end
+
 
 
 function gadget:Shutdown()
+	genBrdfLut:Finalize()
 	if fwdShaderObjValid then
 		fwdShaderObj:Finalize()
 

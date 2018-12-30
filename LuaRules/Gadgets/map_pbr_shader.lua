@@ -123,20 +123,20 @@ end
 -- get = "[20].aaaa" -- sample 20th texture and take A value 4 times to form RGBA value in shader
 local pbrSplatDefaults = {
 	workflow = "metallic", -- either "metallic" or "specular"
-	uvMult = {1.0, 1.0}, -- texture coordinates multiplier. Map-wide UV (0.0 --> 1.0) will be multiplied by this value and then sampled at the result. Default vec2(1.0).
+	uvMult = {1.0, 1.0}, -- texture coordinates multiplier. Map-wide UV (0.0 --> 1.0) will be multiplied by this value and then sampled at the result. Default is nil, which is GLSL vec2(1.0) in fact.
 
 	-- Reference to splats distribution map
 	distrMap = {
-		scale = 1.0, -- multiplier to the texture value or a value in case get == nil
+		scale = 1.0, -- multiplier to the texture value. Defaults to 1.0
 		get = nil, -- reference to splats distribution map. In case of get == nil, this is the default splat. Implementation won't allow for more than one default splat. Default splat is optional.
 		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
 	},
 
-	-- Also known as albedo or diffuse (in PBR sense). 
-	-- "An albedo map defines the color of diffused light. One of the biggest differences between an albedo map in a PBR system and a traditional diffuse map is the lack of directional light or ambient occlusion. 
+	-- Also known as albedo or diffuse (in PBR sense).
+	-- "An albedo map defines the color of diffused light. One of the biggest differences between an albedo map in a PBR system and a traditional diffuse map is the lack of directional light or ambient occlusion.
 	--  Directional light will look incorrect in certain lighting conditions, and ambient occlusion should be added in the separate AO slot."
 	baseColorMap = {
-		scale = {1.0, 1.0, 1.0}, -- acts as a color if tex unit is unused or as a multiplier if tex unit is present. Defaults to vec3(1.0).
+		scale = {1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec3(1.0).
 		get = nil, -- coold be for example "[2].rgb". Takes samples from 2nd texture in textures array.
 		gammaCorrection = true, -- Artists see colors in sRGB, but we need colors in linear space. Therefore this defaults to true.
 	},
@@ -166,19 +166,19 @@ local pbrSplatDefaults = {
 	--   3: add blended on top of the shaded color
 	--   4: lerp blended with the shaded color
 	emissionMap1 = {
-		scale = 1.0, -- acts as a value if tex unit is unused or as a multiplier if tex unit is present. Defaults to 1.0.
+		scale = 1.0, -- acts as as a multiplier if tex unit is present. Defaults to 1.0.
 		get = nil, -- expects a grayscale channel. This will act as a multiplier to baseColorMap
 		gammaCorrection = false, -- Don't do gammaCorrection if 1 channel emissive is used.
 	},
 	emissionMap3 = {
-		scale = {1.0, 1.0, 1.0}, -- acts as a color if tex unit is unused or as a multiplier if tex unit is present. Defaults to vec3(1.0).
+		scale = {1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec3(1.0).
 		get = nil, -- expects RGB channels.
-		gammaCorrection = true, -- Defaults to true, because you might provide RGB channels (see baseColorMap.gammaCorrection).
+		gammaCorrection = true, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection).
 	},
 	emissionMap4 = {
-		scale = {1.0, 1.0, 1.0, 1.0}, -- acts as a color if tex unit is unused or as a multiplier if tex unit is present. Defaults to vec4(1.0).
+		scale = {1.0, 1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec4(1.0).
 		get = nil, -- expects RGBA channels. A-channel represents rate of mix between shaded color and emissive color.
-		gammaCorrection = true, -- Defaults to true, because you might provide RGB channels (see baseColorMap.gammaCorrection). If 1 channel emissive is used don't do gammaCorrection.
+		gammaCorrection = true, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection). If 1 channel emissive is used don't do gammaCorrection.
 	},
 
 	-- Ambient occlusion
@@ -216,7 +216,7 @@ local pbrSplatDefaults = {
 	specularMap = {
 		scale = {1.0, 1.0, 1.0}, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
 		get = nil, -- expects RGB channels.
-		gammaCorrection = false, -- Defaults to true, because you might provide RGB channels (see baseColorMap.gammaCorrection).
+		gammaCorrection = false, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection).
 	},
 }
 
@@ -406,6 +406,65 @@ local function ParseDistrMapOfSplats(pbrMap, boundTexUnits, flippedTexUnits)
 	return splatsReadBodyStr, defaultSplatFound, splatNum
 end
 
+local function NumbersToGLSL(value)
+	if type(value) == "table" then
+		local n = #value
+		if n == 1 then
+			return string.format("%.1f", tonumber(value[1]))
+		elseif n == 2 then
+			return string.format("vec2(%.1f, %.1f)", tonumber(value[1]), tonumber(value[2]))
+		elseif n == 3 then
+			return string.format("vec3(%.1f, %.1f, %.1f)", tonumber(value[1]), tonumber(value[2]), tonumber(value[3]))
+		elseif n == 4 then
+			return string.format("vec4(%.1f, %.1f, %.1f, %.1f)", tonumber(value[1]), tonumber(value[2]), tonumber(value[3]), tonumber(value[4]))
+		else
+			Srping.Echo("Error in NumbersToGLSL")
+		end
+	elseif type(value) == "nil" then
+		return ""
+	else
+		return string.format("%.1f", tonumber(value))
+	end
+end
+
+local function ParseSplats(pbrMap, boundTexUnits, flippedTexUnits)
+	local splatNum = 0
+	for splatName, splatDef in pairs(pbrMap.splats) do
+		local splatMaterialBodyTbl = {}
+
+		local uvMult = splatDef.uvMult
+		if uvMult then
+			table.insert(splatMaterialBodyTbl, string.format("%suv *= %s;", NumbersToGLSL(uvMult)))
+		end
+
+		local workflowSpec = (splatDef.workflow == "specular")
+
+		for splatParamName, splatParamValue in pairs(splatDef) do
+			if splatParamName ~= "distrMap" then
+				local isTable = (type(splatParamValue) == "table")
+				local mapPosS = splatParamName:find("Map")
+
+				if isTable then
+					if splatParamName == "specularMap" then
+						--bla
+					elseif (mapPosS ~= nil) then -- generic map
+						local invert = (splatParamValue.invert and "1.0 - ") or ""
+						local get = splatParamValue.get
+						local scale = NumbersToGLSL(splatParamValue.scale)
+						local memberName = string.sub(splatParamName, 1, mapPosS - 1)
+						local gammaCorrection = splatParamValue.gammaCorrection
+
+
+						string.format("%smaterialParams[%d].%s = "
+					end
+				end
+			else
+				--handle exceptions?
+			end
+		end
+		splatNum = splatNum + 1
+	end
+end
 
 local function ParseEverything(pbrMap)
 	local boundTexUnits, flippedTexUnits = ParseTextures(pbrMap)
@@ -415,6 +474,8 @@ local function ParseEverything(pbrMap)
 	--Spring.Echo(splatsReadBodyStr)
 	--Spring.Echo("defaultSplatFound", defaultSplatFound)
 	--Spring.Echo("splatsCount", splatsCount)
+	local xxx = ParseSplats(pbrMap, boundTexUnits, flippedTexUnits)
+
 end
 
 local function ParseFlagsAndUniforms(pbrMap, boundTexUnits, flippedTexUnits)

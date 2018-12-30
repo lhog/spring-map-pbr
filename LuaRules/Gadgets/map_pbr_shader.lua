@@ -123,15 +123,18 @@ end
 -- get = "[20].aaaa" -- sample 20th texture and take A value 4 times to form RGBA value in shader
 local pbrSplatDefaults = {
 	workflow = "metallic", -- either "metallic" or "specular"
-	uvMult = {1.0, 1.0}, -- texture coordinates multiplier. Default vec2(1.0).
+	uvMult = {1.0, 1.0}, -- texture coordinates multiplier. Map-wide UV (0.0 --> 1.0) will be multiplied by this value and then sampled at the result. Default vec2(1.0).
 
 	-- Reference to splats distribution map
 	distrMap = {
 		scale = 1.0, -- multiplier to the texture value or a value in case get == nil
-		get = nil, -- reference to splats distribution map. In case of get == nil, this is the default splat. Implementation won't allow for more than one default material.
+		get = nil, -- reference to splats distribution map. In case of get == nil, this is the default splat. Implementation won't allow for more than one default splat. Default splat is optional.
 		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
 	},
 
+	-- Also known as albedo or diffuse (in PBR sense). 
+	-- "An albedo map defines the color of diffused light. One of the biggest differences between an albedo map in a PBR system and a traditional diffuse map is the lack of directional light or ambient occlusion. 
+	--  Directional light will look incorrect in certain lighting conditions, and ambient occlusion should be added in the separate AO slot."
 	baseColorMap = {
 		scale = {1.0, 1.0, 1.0}, -- acts as a color if tex unit is unused or as a multiplier if tex unit is present. Defaults to vec3(1.0).
 		get = nil, -- coold be for example "[2].rgb". Takes samples from 2nd texture in textures array.
@@ -187,6 +190,7 @@ local pbrSplatDefaults = {
 
 	-- Specular F0: a linear grayscale texture for Fresnel values (non-metals). Can be used in both metallic and specular workflows
 	-- Most often than not, this map is unused.
+	-- DO NOT MIX IT UP with specularMap below
 	specularF0Map = {
 		scale = 0.04, --acts as a multiplier or a base value (if get is nil). Defaults to 0.04.
 		get = nil, -- expects a grayscale channel.
@@ -212,7 +216,7 @@ local pbrSplatDefaults = {
 	specularMap = {
 		scale = {1.0, 1.0, 1.0}, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
 		get = nil, -- expects RGB channels.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
+		gammaCorrection = false, -- Defaults to true, because you might provide RGB channels (see baseColorMap.gammaCorrection).
 	},
 }
 

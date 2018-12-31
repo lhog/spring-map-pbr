@@ -454,8 +454,6 @@ local function ParseSplats(pbrMap, boundTexUnits, flippedTexUnits)
 						local memberName = string.sub(splatParamName, 1, mapPosS - 1)
 						local gammaCorrection = splatParamValue.gammaCorrection
 
-
-						string.format("%smaterialParams[%d].%s = "
 					end
 				end
 			else

@@ -4,8 +4,8 @@ function gadget:GetInfo()
 		desc      = "Applies PBR to map surface",
 		author    = "ivand",
 		date      = "2018-2019",
-		license   = " ",
-		layer     = 1000,
+		license   = "PD",
+		layer     = 0,
 		enabled   = true,
 	}
 end
@@ -117,409 +117,85 @@ function Table.Merge(originalTable, overrideTable)
     return originalTable
 end
 
--- Below are examples of how "get" statement might look like
--- get = "[0].rgb" -- sample 0th texture and take RGB channels
--- get = "[10].a" -- sample 10th texture and take A channel
--- get = "[20].aaaa" -- sample 20th texture and take A value 4 times to form RGBA value in shader
 local pbrSplatDefaults = {
-	workflow = "metallic", -- either "metallic" or "specular"
-	uvMult = {1.0, 1.0}, -- texture coordinates multiplier. Map-wide UV (0.0 --> 1.0) will be multiplied by this value and then sampled at the result. Default is nil, which is GLSL vec2(1.0) in fact.
+	weight = "0.0;",
+	baseColor = "vec3(0.0);",
+	normals = "vec3(0.0);",
+	bump = "0.0;",
+	pomMaxSteps = "32;",
+	pomScale = "0.0;",
+	emissionColor = "vec3(0.0);",
+	occlusion = "1.0;",
+	specularF0 = "0.04;",
+	roughness = "0.0;", -- to convert from glossiness use 1.0 - <glossiness>
+	metalness = "0.0;", -- in case of specular WF, use ConvertToMetalness() call
+}
 
-	-- Reference to splats distribution map
-	distrMap = {
-		scale = 1.0, -- multiplier to the texture value. Defaults to 1.0
-		get = nil, -- reference to splats distribution map. In case of get == nil, this is the default splat. Implementation won't allow for more than one default splat. Default splat is optional.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Also known as albedo or diffuse (in PBR sense).
-	-- "An albedo map defines the color of diffused light. One of the biggest differences between an albedo map in a PBR system and a traditional diffuse map is the lack of directional light or ambient occlusion.
-	--  Directional light will look incorrect in certain lighting conditions, and ambient occlusion should be added in the separate AO slot."
-	baseColorMap = {
-		scale = {1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec3(1.0).
-		get = nil, -- coold be for example "[2].rgb". Takes samples from 2nd texture in textures array.
-		gammaCorrection = true, -- Artists see colors in sRGB, but we need colors in linear space. Therefore this defaults to true.
-	},
-
-	-- Tangent space normal map
-	normalMap = {
-		scale = {1.0, 1.0, 1.0}, -- scale for normals sampled from normalMapTex. Use to scale one direction of normals or increase/reduce normal values of this material in the mix. Defaults to vec3(1.0)
-		get = nil, --If you use DDS and see some weird moar/acne like artifacts, use uncompressed DDS instead.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Used for height based materials blending.
-	bumpMap = {
-		-- the next three params are applied like this: (1) Invert(if any) (2) Bias (3) Scale
-		invert = false, -- invert height value, i.e. height = (1.0 - height).
-		bias = 0.0,  -- Bias to height value. Use to lower or raise height value of this material. Can be useful for height based materials blending
-		scale = 1.0, -- Scale factor for height.
-		pomScale = 0.02, -- Set to non-nil to enable Parallax Occlusion Mapping. Reduce in case of severe texture distortions or layering.
-		pomMaxSteps = 32, -- Maximal number of iterations spent by Parallax Occlusion Mapping algorithm on one screen pixel.
-		get = nil, --expects one grayscale channel
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-
-	-- Emission color map:
-	--   1: multiplier to baseColor
-	--   3: add blended on top of the shaded color
-	--   4: lerp blended with the shaded color
-	emissionMap1 = {
-		scale = 1.0, -- acts as as a multiplier if tex unit is present. Defaults to 1.0.
-		get = nil, -- expects a grayscale channel. This will act as a multiplier to baseColorMap
-		gammaCorrection = false, -- Don't do gammaCorrection if 1 channel emissive is used.
-	},
-	emissionMap3 = {
-		scale = {1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec3(1.0).
-		get = nil, -- expects RGB channels.
-		gammaCorrection = true, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection).
-	},
-	emissionMap4 = {
-		scale = {1.0, 1.0, 1.0, 1.0}, -- acts as a multiplier if tex unit is present. Defaults to vec4(1.0).
-		get = nil, -- expects RGBA channels. A-channel represents rate of mix between shaded color and emissive color.
-		gammaCorrection = true, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection). If 1 channel emissive is used don't do gammaCorrection.
-	},
-
-	-- Ambient occlusion
-	occlusionMap = {
-		scale = 1.0, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
-		get = nil, -- expects a grayscale channel. Note 1.0 means unoccluded, 0.0 - shadowed.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Specular F0: a linear grayscale texture for Fresnel values (non-metals). Can be used in both metallic and specular workflows
-	-- Most often than not, this map is unused.
-	-- DO NOT MIX IT UP with specularMap below
-	specularF0Map = {
-		scale = 0.04, --acts as a multiplier or a base value (if get is nil). Defaults to 0.04.
-		get = nil, -- expects a grayscale channel.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Supports either a roughness or glossiness map. Can be used in both metallic and specular workflows.
-	roughnessMap = {
-		invert = false, -- invert i.e. roughness = (1.0 - glossiness). Do so in case when supplied map represents glossiness. Default to false
-		scale = 1.0, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
-		get = nil, -- expects a grayscale channel.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Metalness workflow. Only considered if workflow = "metallic"
-	metallicMap = {
-		scale = 1.0, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
-		get = nil, -- expects a grayscale channel.
-		gammaCorrection = false, -- Defaults to false. Don't change unless you know what you are doing!
-	},
-
-	-- Specular workflow. Only considered if workflow = "specular"
-	specularMap = {
-		scale = {1.0, 1.0, 1.0}, --acts as a multiplier or a base value (if get is nil) Defaults to 1.0.
-		get = nil, -- expects RGB channels.
-		gammaCorrection = false, -- Defaults to true, because you should provide RGB channels (see baseColorMap.gammaCorrection).
-	},
+local pbrMapDefaultDefinitions = {
+	["HAS_DEFAULT_SPLAT"] = "0", -- Default splat (if used) is always the first splat in splats array
+	["FAST_GAMMA"] = "0",
+	["DO_POM"] = "1",
+	["MAT_BLENDING"] = "MAT_BLENDING_WEIGHT",
+	["EXPOSURE(preExpColor)"] = "preExpColor",
+	["TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
+	["IBL_INVERSE_TONEMAP(color)"] = "color", -- Might want to use expExpand(). See details in the shader code
+	["IBL_SCALE_DIFFUSE(color)"] = "color",
+	["IBL_SCALE_SPECULAR(color)"] = "color",
 }
 
 local pbrMapDefaults = {
-	fastGamma = false, --default is false i.e. more precise method
-	exposure = 1.0, -- RGB color multiplier before color is feed to tonemapper or to user's screen (if tonemap is nil)
-	toneMapping = nil, --valid values are "aces", "uncharted2", "filmic", "reinhard", "log", "romBinDaHouse", "lumaReinhard", "hejl2015", "steveM1", "steveM2".
-	gammaCorrection = true, -- do gamma correction (RGB-->sRGB) on the final color.
-	iblMap = {
-		invToneMapExp = nil, -- can be some value to enable poor man's SDR to HDR mapping (inverse tonemapping)
-		scale = {1.0, 1.0}, --{diffuse, specular} IBL scale. Acts as a multiplier to base values.
-		gammaCorrection = false, -- Artists see colors in sRGB, but we need colors in linear space. Therefore this defaults to true.
-	},
-	splats = {
-	},
+	finalColor = "toSRGB(postTMColor);",
+	definitions = pbrMapDefaultDefinitions,
+	customCode = "",
+	splats = {},
 	textures = {
+		"%%%BRDF%%%" = 30,
+		--something for irradiance = 31,
+		"$reflection" = 32,
 	},
-	debug = {
-	},
+	debug = {},
 }
-
-local DefinitionGenerators = {
-	["pomScale"] = true,
-	["pomMaxSteps"] = true,
-	["invToneMapExp"] = true,
-}
-
-local function ParseSubtable(prefix, mapName, mapValue, uniformsFloat, uniformsSampler, definitions, ignoreList)
-	if not prefix then prefix = "" end
-	if not mapName then mapName = "" end
-	if not ignoreList then ignoreList = {} end
-
-	local camelPrefix = prefix:gsub("^%l", string.lower)
-	local capitalPrefix = prefix:gsub("%l", string.upper)
-
-	local camelMapName = mapName:gsub("^%l", string.upper)
-	local capitalMapName = mapName:gsub("%l", string.upper)
-
-	local definitionKeyTemplate = ""
-	local capitalizeUniformKey = false
-
-	if capitalPrefix ~= "" then
-		capitalizeUniformKey = capitalizeUniformKey or true
-		definitionKeyTemplate = definitionKeyTemplate .. "%s_"
-	else
-		definitionKeyTemplate = definitionKeyTemplate .. "%s"
-	end
-
-	if mapName ~= "" then
-		capitalizeUniformKey = capitalizeUniformKey or true
-		definitionKeyTemplate = definitionKeyTemplate .. "%s_"
-	else
-		definitionKeyTemplate = definitionKeyTemplate .. "%s"
-	end
-
-	--Spring.Echo("definitionKeyTemplate", definitionKeyTemplate)
-
-	local definitionKeyPrefix = string.format( definitionKeyTemplate, capitalPrefix, capitalMapName)
-	local uniformKeyPrefix = string.format( "%s%s", camelPrefix, camelMapName)
-
-	for k, v in pairs(mapValue) do
-
-		local definitionKey = definitionKeyPrefix .. k:gsub("%l", string.upper)
-
-		local uniformKey
-		if capitalizeUniformKey then
-			uniformKey = uniformKeyPrefix .. k:gsub("^%l", string.upper)
-		else
-			uniformKey = uniformKeyPrefix .. k
-		end
-
-		--Spring.Echo("uniformKey", uniformKey)
-		--Spring.Echo("definitionKey", definitionKey)
-
-		local onIgnoreList = false
-
-		for _, v in ipairs(ignoreList) do
-			if k:find(v) ~= nil then
-				onIgnoreList = true
-				break;
-			end
-		end
-
-		--Spring.Echo("#0")
-		valType = type(v)
-		--Spring.Echo("#0", mapName, valType, k)
-		if not onIgnoreList then
-			if valType == "number" or valType == "table" then --scalars and arrays of scalars
-				--Spring.Echo("#0000")
-				if DefinitionGenerators[k] then
-					-- Sometimes we want a number to be placed in #define
-					definitions[definitionKey] = v
-					--Spring.Echo("#1")
-				else
-					-- Most often we want number or vector to go to uniforms
-					uniformsFloat[uniformKey] = v
-					--Spring.Echo("#2")
-				end
-			elseif valType == "boolean" then -- generate definition in case of boolean set to true
-				definitions[definitionKey] = tostring( (v and 1) or 0 )
-				--Spring.Echo("#3")
-			elseif valType == "string" then
-				if v == "get" then
-					definitions[definitionKey] = string.format( "%s%s", "texels", v)
-					--Spring.Echo("#4")
-				else
-					local definitionVal = string.format( "%s_%s", definitionKey, v:gsub("%l", string.upper) )
-					definitions[definitionKey] = definitionVal
-					--Spring.Echo("#5")
-				end
-			else
-				--ignore everything else
-			end
-		end
-	end
-end
-
 
 local function ParseTextures(pbrMap)
 	local TEXTURE_DIR = "maps/"
 
 	local boundTexUnits = {}
-	local flippedTexUnits = {}
 
-	for tu, texDef in pairs(pbrMap.textures) do
-		if texDef and texDef.name and texDef.name:len() >= 1 then
-			local texDefName = texDef.name
-			if texDefName ~= "$" then
+	for texName, tu in pairs(pbrMap.textures) do
+		local tun = tonumber(tu)
+		if texName:len() >= 1 then
+			if texName[1] == "$" then
+				if gl.TextureInfo(texName) then
+					boundTexUnits[tun] = texName
+				else
+					Spring.Echo(string.format( "[%s]: Failed to find PBR Lua texture (%s) to be bound to texture unit %d", gadget:GetInfo().name, texName, tun ))
+				end
+			elseif texName = "%%%BRDF%%%" then
+				boundTexUnits[tun] = texName -- just mark
+			else
 				--filter out gl.Texture options to get filename
-				local s, e = string.find(texDefName, ":.-:")
+				local s, e = string.find(texName, ":.-:")
 				local texOpt = ""
 				if s and e then
-					texOpt = string.sub(texDefName, s, e)
+					texOpt = string.sub(texName, s, e)
 				end
-				local fileName = string.gsub(texDefName, ":.-:", "")
+				local fileName = string.gsub(texName, ":.-:", "")
 				local newFilePath = TEXTURE_DIR .. fileName
 				if VFS.FileExists(newFilePath) then
-					boundTexUnits[tu] = texOpt .. newFilePath --keep :{opts}:
+					boundTexUnits[tun] = texOpt .. newFilePath --keep :{opts}:
 				else
-					Spring.Echo(string.format( "[%s]: Failed to find PBR texture file (%s) to be bound to texture unit %d", gadget:GetInfo().name, newFilePath, tu ))
+					Spring.Echo(string.format( "[%s]: Failed to find PBR texture file (%s) to be bound to texture unit %d", gadget:GetInfo().name, newFilePath, tun ))
 				end
-			else
-				boundTexUnits[tu] = texDefName --bind $blabla textures unconditionally
 			end
 
-			flippedTexUnits[tu] = texDef.flip
 		end
 	end
 
-	return boundTexUnits, flippedTexUnits
-end
-
-local function ParseDistrMapOfSplats(pbrMap, boundTexUnits, flippedTexUnits)
-	local splatsReadBodyTbl = {}
-	local defaultSplatFound = false
-	local tabPrefix = "\t"
-
-	for splatName, splatDef in pairs(pbrMap.splats) do
-		local splatDefDistrMap = splatDef.distrMap
-		if not (splatDefDistrMap and splatDefDistrMap.get) then
-			if not defaultSplatFound then
-				defaultSplatFound = true
-			else
-				Spring.Echo("Error, more than 1 default splat specified")
-			end
-		end
-	end
-
-	local splatNum = (defaultSplatFound and 1) or 0
-
-	for splatName, splatDef in pairs(pbrMap.splats) do
-		local splatDefDistrMap = splatDef.distrMap
-		if splatDefDistrMap and splatDefDistrMap.get then
-			local scale = splatDefDistrMap.scale
-			local texUnitNum = tonumber( string.match(splatDefDistrMap.get, "%[(%d-)%]") )
-			if not boundTexUnits[texUnitNum] then
-				Spring.Echo("Error, attempt to reference texture unit that was not bound")
-			end
-			local texUnitChannel = string.match(splatDefDistrMap.get, "%.(%a+)")
-			local straightOrFlipped = ( (flippedTexUnits[texUnitNum] and "flippedMapUV") or "straightMapUV" )
-			table.insert( splatsReadBodyTbl, string.format("%ssplatWeights[%d] = %.1f * texture(tex%d, %s, lodBias).%s;", tabPrefix, splatNum, scale, texUnitNum, straightOrFlipped, texUnitChannel) )
-			splatNum = splatNum + 1
-		end
-	end
-
-	local splatsReadBodyStr = table.concat(splatsReadBodyTbl, " \n")
-	return splatsReadBodyStr, defaultSplatFound, splatNum
-end
-
-local function NumbersToGLSL(value)
-	if type(value) == "table" then
-		local n = #value
-		if n == 1 then
-			return string.format("%.1f", tonumber(value[1]))
-		elseif n == 2 then
-			return string.format("vec2(%.1f, %.1f)", tonumber(value[1]), tonumber(value[2]))
-		elseif n == 3 then
-			return string.format("vec3(%.1f, %.1f, %.1f)", tonumber(value[1]), tonumber(value[2]), tonumber(value[3]))
-		elseif n == 4 then
-			return string.format("vec4(%.1f, %.1f, %.1f, %.1f)", tonumber(value[1]), tonumber(value[2]), tonumber(value[3]), tonumber(value[4]))
-		else
-			Srping.Echo("Error in NumbersToGLSL")
-		end
-	elseif type(value) == "nil" then
-		return ""
-	else
-		return string.format("%.1f", tonumber(value))
-	end
-end
-
-local function ParseSplats(pbrMap, boundTexUnits, flippedTexUnits)
-	local splatNum = 0
-	for splatName, splatDef in pairs(pbrMap.splats) do
-		local splatMaterialBodyTbl = {}
-
-		local uvMult = splatDef.uvMult
-		if uvMult then
-			table.insert(splatMaterialBodyTbl, string.format("%suv *= %s;", NumbersToGLSL(uvMult)))
-		end
-
-		local workflowSpec = (splatDef.workflow == "specular")
-
-		for splatParamName, splatParamValue in pairs(splatDef) do
-			if splatParamName ~= "distrMap" then
-				local isTable = (type(splatParamValue) == "table")
-				local mapPosS = splatParamName:find("Map")
-
-				if isTable then
-					if splatParamName == "specularMap" then
-						--bla
-					elseif (mapPosS ~= nil) then -- generic map
-						local invert = (splatParamValue.invert and "1.0 - ") or ""
-						local get = splatParamValue.get
-						local scale = NumbersToGLSL(splatParamValue.scale)
-						local memberName = string.sub(splatParamName, 1, mapPosS - 1)
-						local gammaCorrection = splatParamValue.gammaCorrection
-
-					end
-				end
-			else
-				--handle exceptions?
-			end
-		end
-		splatNum = splatNum + 1
-	end
+	return boundTexUnits
 end
 
 local function ParseEverything(pbrMap)
-	local boundTexUnits, flippedTexUnits = ParseTextures(pbrMap)
-	--Table.Echo({boundTexUnits = boundTexUnits, flippedTexUnits = flippedTexUnits}, "boundTexUnits, flippedTexUnits")
-
-	local splatsReadBodyStr, defaultSplatFound, splatsCount = ParseDistrMapOfSplats(pbrMap, boundTexUnits, flippedTexUnits)
-	--Spring.Echo(splatsReadBodyStr)
-	--Spring.Echo("defaultSplatFound", defaultSplatFound)
-	--Spring.Echo("splatsCount", splatsCount)
-	local xxx = ParseSplats(pbrMap, boundTexUnits, flippedTexUnits)
-
-end
-
-local function ParseFlagsAndUniforms(pbrMap, boundTexUnits, flippedTexUnits)
-	local definitions = {}
-	local uniformsSampler = {}
-	local uniformsFloat = {}
-
-	local ignoreList1 = {
-		"splats", "textures", "debug"
-	}
-
-	ParseSubtable(nil, nil, pbrMap, uniformsFloat, uniformsSampler, definitions, ignoreList1)
-
-	--[[
-	for paramName, paramValue in pairs(pbrMap) do
-		local paramValueType = type(paramValue)
-		if paramName ~= "splats" and paramName ~= "textures" then --skip splats and textures
-			if paramName == "iblMap" and paramValueType == "table" then
-
-			elseif paramDefType == "boolean" and paramValue then
-				table.insert(definitions, string.format( "#define %s", string.upper(paramName) ))
-			elseif paramDefType == "number" then
-				table.insert(uniformsFloat, {
-					[paramName] = paramValue
-				})
-			end
-
-		end
-	end
-	]]--
-	Table.Echo(pbrMap.splats, "pbrMap.splats")
-
-	local splatNum = 0
-	for splatName, splatDef in pairs(pbrMap.splats) do
-		--Spring.Echo("pbrMap.splats", splatName, splatDef)
-		if type(splatDef) == "table" then
-			Spring.Echo("!!!!!!!!!!splats!!!!!!!!!!")
-			ParseSubtable("splats", tostring(splatNum), splatDef, uniformsFloat, uniformsSampler, definitions, nil)
-			splatNum = splatNum + 1
-		end
-	end
-
-	Table.Echo(uniformsFloat, "uniformsFloat")
-	Table.Echo(uniformsSampler, "uniformsSampler")
-	Table.Echo(definitions, "definitions")
-
+	local boundTexUnits = ParseTextures(pbrMap)
 end
 
 local function ParsePbrMapParams()
@@ -535,7 +211,6 @@ local function ParsePbrMapParams()
 
 	-- replace lowercased values with camelCase. Whereever we can.
 	pbrMap = Table.RestoreKeysCase(pbrMap, pbrMapDefaults)
-
 	-- merge pbrMap with defaults
 	pbrMap = Table.MergeWithDefaults(pbrMap, pbrMapDefaults)
 

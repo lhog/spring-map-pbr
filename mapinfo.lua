@@ -252,37 +252,13 @@ local mapinfo = {
 		pbr = {
 			enabled = true,
 			textures = {
-				[2] = { name = "icedist.dds", flip = false }, -- False is for DDS, True is for everything else.
-				[20] = { name = "", flip = true },
-				[21] = { name = "" },
-				[22] = { name = "" },
-				[23] = { name = "" },
+				["icedist.dds"] = 20,
 			},
 			splats = {
-				grass = {
-					distrMap = {
-						get = "[2].r",
-						scale = 1.0,
-					},
-				},
-				dirt = {
-					distrMap = {
-						get = "[2].g",
-						scale = 1.5,
-					},
-				},
-				shit = {
-					distrMap = {
-						get = "[2].b",
-						scale = 1.25,
-					},
-				},
-				default = {
-					distrMap = {
-						get = "[2].a",
-						--scale = 1.5,
-					},
-				},					
+				{ },
+				{ },
+				{ },
+				{ },
 			},
 		},
 	},

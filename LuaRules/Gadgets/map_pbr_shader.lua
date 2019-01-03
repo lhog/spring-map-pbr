@@ -117,27 +117,42 @@ function Table.Merge(originalTable, overrideTable)
     return originalTable
 end
 
+function Table.ToString(tbl, format)
+	local result = ""
+	for _, v in ipairs(tbl) do
+		result = result .. string.format(format, v)
+	end
+	return result
+end
+
 local pbrSplatDefaults = {
+	workflow = "METALNESS",
+
 	weight = "0.0;",
-	baseColor = "vec3(0.0);",
-	normals = "vec3(0.0);",
-	bump = "0.0;",
-	pomMaxSteps = "32;",
+
+	diffuseColor = "vec3(0.0);", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	specularColor = "vec3(0.0);", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+
+	baseColor = "vec3(0.0);", -- Only in use when workflow == METALNESS. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+
+	blendNormal = "vec3(0.0);", -- TBN space normals, that will be blended into map normals
+	height = "0.0;", -- Used for height based blending and POM
 	pomScale = "0.0;",
-	emissionColor = "vec3(0.0);",
-	occlusion = "1.0;",
-	specularF0 = "0.04;",
-	roughness = "0.0;", -- to convert from glossiness use 1.0 - <glossiness>
-	metalness = "0.0;", -- in case of specular WF, use ConvertToMetalness() call
+	emissionColor = "vec3(0.0);", -- Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	occlusion = "1.0;", -- 1.0 is unoccluded.
+	specularF0 = "0.04;", -- More often than not you won't be using this.
+	roughness = "0.0;", -- To convert from glossiness use 1.0 - <glossiness>
+
+	metalness = "0.0;", -- Only in use when workflow == METALNESS.
 }
 
 local pbrMapDefaultDefinitions = {
-	["HAS_DEFAULT_SPLAT"] = "0", -- Default splat (if used) is always the first splat in splats array
 	["FAST_GAMMA"] = "0",
-	["DO_POM"] = "1",
+	["WEIGHT_CUTOFF"] = "10.0/255.0",
+	["POM_MAXSTEPS"] = "32",
 	["MAT_BLENDING"] = "MAT_BLENDING_WEIGHT",
-	["EXPOSURE(preExpColor)"] = "preExpColor",
-	["TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
+	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
+	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
 	["IBL_INVERSE_TONEMAP(color)"] = "color", -- Might want to use expExpand(). See details in the shader code
 	["IBL_SCALE_DIFFUSE(color)"] = "color",
 	["IBL_SCALE_SPECULAR(color)"] = "color",
@@ -149,9 +164,6 @@ local pbrMapDefaults = {
 	customCode = "",
 	splats = {},
 	textures = {
-		"%%%BRDF%%%" = 30,
-		--something for irradiance = 31,
-		"$reflection" = 32,
 	},
 	debug = {},
 }
@@ -161,17 +173,20 @@ local function ParseTextures(pbrMap)
 
 	local boundTexUnits = {}
 
-	for texName, tu in pairs(pbrMap.textures) do
+	for tu, texName in pairs(pbrMap.textures) do
 		local tun = tonumber(tu)
+
+		if boundTexUnits[tun] then
+			Spring.Echo(string.format( "[%s]: Texture unit (%d) is referenced more than once", gadget:GetInfo().name, tun ))
+		end
+
 		if texName:len() >= 1 then
-			if texName[1] == "$" then
+			if texName:find("%$") then
 				if gl.TextureInfo(texName) then
 					boundTexUnits[tun] = texName
 				else
 					Spring.Echo(string.format( "[%s]: Failed to find PBR Lua texture (%s) to be bound to texture unit %d", gadget:GetInfo().name, texName, tun ))
 				end
-			elseif texName = "%%%BRDF%%%" then
-				boundTexUnits[tun] = texName -- just mark
 			else
 				--filter out gl.Texture options to get filename
 				local s, e = string.find(texName, ":.-:")
@@ -187,27 +202,140 @@ local function ParseTextures(pbrMap)
 					Spring.Echo(string.format( "[%s]: Failed to find PBR texture file (%s) to be bound to texture unit %d", gadget:GetInfo().name, newFilePath, tun ))
 				end
 			end
-
 		end
 	end
 
 	return boundTexUnits
 end
 
-local function ParseEverything(pbrMap)
-	local boundTexUnits = ParseTextures(pbrMap)
+local specularWFSplatTemplate = [[
+	{
+		const float epsilon = 1e-6;
+
+		vec3 diffuseColor = ###DIFFUSE_COLOR###
+		vec3 specularColor = ###SPECULAR_COLOR###
+		float maxSpecular = max(max(specularColor.r, specularColor.g), specularColor.b);
+
+		float specularF0 = ###SPECULAR_F0###
+		float metalness = ConvertToMetalness(diffuseColor, specularColor, maxSpecular, specularF0);
+
+		vec3 baseColorDiffusePart = diffuseColor.rgb * ((1.0 - maxSpecular) / (1 - specularF0) / max(1.0 - metalness, epsilon));
+		vec3 baseColorSpecularPart = specularColor - (vec3(specularF0) * (1.0 - metalness) * (1.0 / max(metalness, epsilon)));
+
+		vec3 baseColor = mix(baseColorDiffusePart, baseColorSpecularPart, metalness * metalness);
+		baseColor = clamp( baseColor, vec3(0.0), vec3(1.0) );
+
+		material[###MAT_NUM###].baseColor = vec4(baseColor, diffuseColor.a);
+
+		material[###MAT_NUM###].blendNormal = ###BLEND_NORMALS###
+		material[###MAT_NUM###].height = ###HEIGHT###
+		material[###MAT_NUM###].pomScale = ###POM_SCALE###
+		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###
+		material[###MAT_NUM###].occlusion = ###OCCLUSION###
+		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###
+		material[###MAT_NUM###].roughness = ###ROUGHNESS###
+
+		material[###MAT_NUM###].metalness = metalness;
+	}
+]]
+
+local metalnessWFSplatTemplate = [[
+	{
+		material[###MAT_NUM###].baseColor = ###BASE_COLOR###
+
+		material[###MAT_NUM###].blendNormal = ###BLEND_NORMALS###
+		material[###MAT_NUM###].height = ###HEIGHT###
+		material[###MAT_NUM###].pomScale = ###POM_SCALE###
+		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###
+		material[###MAT_NUM###].occlusion = ###OCCLUSION###
+		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###
+		material[###MAT_NUM###].roughness = ###ROUGHNESS###
+
+		material[###MAT_NUM###].metalness = ###METALNESS###
+	}
+]]
+
+local function ParseSplats(pbrMap)
+	local hasDefaultSplat = false
+	local splatsCode = ""
+	local splatsWeightCode = ""
+
+	local splatNum = 0
+	for splatId, splatDef in pairs(pbrMap.splats) do
+		if splatDef.weight == pbrSplatDefaults.weight then
+			if splatNum ~= 0 then
+				Spring.Echo("Error: Default splat must be first in the splats array")
+			else
+				if hasDefaultSplat == false then
+					hasDefaultSplat = true
+				else
+					Spring.Echo("Error: Too many default splats are defined")
+				end
+			end
+		end
+
+		splatsWeightCode = splatsWeightCode .. string.format("\tmaterial[%d].weight = %s\n", splatNum, splatDef.weight)
+
+		local splatCode = ""
+
+		if splatDef.workflow == "METALNESS" then
+			splatCode = string.format("%s", metalnessWFSplatTemplate)
+
+			splatCode = splatCode:gsub("###MAT_NUM###", splatNum)
+
+			splatCode = splatCode:gsub("###BASE_COLOR###", splatDef.baseColor)
+
+			splatCode = splatCode:gsub("###BLEND_NORMALS###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
+			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
+			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
+			splatCode = splatCode:gsub("###OCCLUSION###", splatDef.occlusion)
+			splatCode = splatCode:gsub("###SPECULAR_F0###", splatDef.specularF0)
+			splatCode = splatCode:gsub("###ROUGHNESS###", splatDef.roughness)
+
+			splatCode = splatCode:gsub("###METALNESS###", splatDef.metalness)
+
+		elseif splatDef.workflow == "SPECULAR" then
+			splatCode = string.format("%s", specularWFSplatTemplate)
+
+			splatCode = splatCode:gsub("###MAT_NUM###", splatNum)
+
+			splatCode = splatCode:gsub("###DIFFUSE_COLOR###", splatDef.diffuseColor)
+			splatCode = splatCode:gsub("###SPECULAR_COLOR###", splatDef.specularColor)
+
+			splatCode = splatCode:gsub("###BLEND_NORMALS###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
+			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
+			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
+			splatCode = splatCode:gsub("###OCCLUSION###", splatDef.occlusion)
+			splatCode = splatCode:gsub("###SPECULAR_F0###", splatDef.specularF0)
+			splatCode = splatCode:gsub("###ROUGHNESS###", splatDef.roughness)
+
+		else
+			Spring.Echo("Error: Wrong workflow name")
+		end
+
+		splatsCode = splatsCode .. "\n\n" .. splatCode
+		splatNum = splatNum + 1
+	end
+
+	return splatsCode, splatsWeightCode, hasDefaultSplat, splatNum
 end
 
-local function ParsePbrMapParams()
+local function ParseEverything()
 	local mapInfo = VFS.Include("mapinfo.lua", nil, VFS.MAP)
 	local pbrMap = (mapInfo.custom or {}).pbr
 	if not pbrMap then
-		return nil
+		Spring.Echo("Map PBR is not enabled on this map, unloading gadget")
+		gadgetHandler:RemoveGadget()
 	end
 
 	if not pbrMap.enabled or not pbrMap.textures or not pbrMap.splats then
-		return nil
+		Spring.Echo("Map PBR is not enabled on this map, unloading gadget")
+		gadgetHandler:RemoveGadget()
 	end
+
+	Spring.Echo("Map PBR is enabled on this map, loading gadget")
 
 	-- replace lowercased values with camelCase. Whereever we can.
 	pbrMap = Table.RestoreKeysCase(pbrMap, pbrMapDefaults)
@@ -228,145 +356,75 @@ local function ParsePbrMapParams()
 		pbrMap.splats[splatName] = Table.MergeWithDefaults(pbrMap.splats[splatName], pbrSplatDefaults)
 	end
 
-	Table.Echo(pbrMap, "pbrMap")
-	ParseEverything(pbrMap)
 
-	return true
+	local boundTexUnits, samplerTypes = ParseTextures(pbrMap)
+
+	local samplerUniformsCode = ""
+	for tun, _ in pairs(boundTexUnits) do
+		samplerUniformsCode = samplerUniformsCode .. string.format("uniform sampler2D tex%d;\n", tun)
+	end
+
+	local splatsCode, splatsWeightCode, hasDefaultSplat, splatCount = ParseSplats(pbrMap)
+	pbrMap.definitions["HAS_DEFAULT_SPLAT"] = (hasDefaultSplat and "1") or "0"
+
+
+	local customDefinitions = ""
+	for defKey, defVal in pairs(pbrMap.definitions) do
+		customDefinitions = customDefinitions .. string.format("#define %s %s\n", defKey, defVal)
+	end
+
+	splatsVarCode = string.format("MaterialInfo material[%d];", splatCount)
+
+	--Table.Echo({splatsCode=splatsCode, splatsWeightCode=splatsWeightCode, hasDefaultSplat=hasDefaultSplat, splatCount=splatCount}, "ParseSplats")
+
+	--Spring.Echo("samplerUniformsCode", samplerUniformsCode)
+
+	--Spring.Echo("splatsCode", splatsCode)
+	--Spring.Echo("splatsWeightCode", splatsWeightCode)
+	--Spring.Echo("customDefinitions", customDefinitions)
+
+	return samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode, customDefinitions, pbrMap.customCode, boundTexUnits
 end
 
 
-local function GetFlagsTexturesUniforms()
-	local mapInfo = VFS.Include("mapinfo.lua", nil, VFS.MAP)
-	--GG.TableEcho(mapinfo, "mapinfo")
-	local mapResources = mapInfo.resources
-	local mapLighting = mapInfo.lighting
-	local mapSplats = mapInfo.splats
-	local mapWater = mapInfo.water
-	local pbrMap = (mapInfo.custom or {}).pbr
 
-	local definitions = {}
-	local uniformsFloat = {}
-	local uniformsInt = {}
-	local textures = {}
+--  Gadget Global Vars  --
+local fwdShaderObjValid = false
+local fwdShaderObj = nil
 
+local firstTime = true
+local updateHeights = true
+
+local oldSunPos = {-1, -1, -1}
+local updateSunPos = false
+
+local genBrdfLut = nil
+local boundTexUnits = nil
+-- /Gadget Global Vars/ --
+
+function gadget:Initialize()
+
+	local samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode, customDefinitions, customCode
+
+	samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode,
+	customDefinitions, customCode, boundTexUnits = ParseEverything()
+
+	local boundSamplers = {}
+	for tun, _ in pairs(boundTexUnits) do
+		boundSamplers[string.format("tex%d", tun)] = tun
+	end
+
+	boundSamplers["diffuseTex"] = 0
+	boundSamplers["brdfLUTTex"] = 29
+	boundSamplers["terrainNormalsTex"] = 30
+	boundSamplers["reflectionTex"] = 31
+	--Table.Echo(boundSamplers, "boundSamplers")
+
+	uniformsFloat = {}
 	local pwr2mapx, pwr2mapy = GetNextPowerOf2({Game.mapSizeX, Game.mapSizeZ})
 
-	table.insert(definitions, "#version 150 compatibility")
-	table.insert(definitions, "#define NOSPRING")
-
-	local hasDNTS = false
-	local hasSplats = false
-	local hasSplatsDistr = false
-
-	--GG.TableEcho(mapResources, "mapResources")
-
-	for k, v in pairs(mapResources) do
-		if 		k == string.lower("detailTex") then
-			--unconditional ...
-		elseif 	k ==  "splatDetailTex" then
-			hasSplats = true
-		elseif 	k ==  string.lower("specularTex") then
-			table.insert(definitions, "#define SMF_SPECULAR_LIGHTING")
-		elseif 	k ==  string.lower("splatDistrTex") then
-			hasSplatsDistr = true
-		elseif 	k ==  string.lower("skyReflectModTex") then
-			table.insert(definitions, "#define SMF_SKY_REFLECTIONS")
-		elseif 	k ==  string.lower("splatDetailNormalTex1") then
-			hasDNTS = true
-		elseif 	k ==  string.lower("splatDetailNormalTex2") then
-			hasDNTS = true
-		elseif 	k ==  string.lower("splatDetailNormalTex3") then
-			hasDNTS = true
-		elseif 	k ==  string.lower("splatDetailNormalTex4") then
-			hasDNTS = true
-		elseif 	k ==  string.lower("splatDetailNormalDiffuseAlpha") then
-			if v and v == 1.0 then
-				table.insert(definitions, "#define SMF_DETAIL_NORMAL_DIFFUSE_ALPHA")
-			end
-		elseif 	k ==  string.lower("detailNormalTex") then
-			table.insert(definitions, "#define SMF_BLEND_NORMALS")
-		elseif 	k ==  string.lower("lightEmissionTex") then
-			table.insert(definitions, "#define SMF_LIGHT_EMISSION")
-		elseif 	k ==  string.lower("parallaxHeightTex") then
-			table.insert(definitions, "#define SMF_PARALLAX_MAPPING")
-		end
-	end
-
-	-- HAVE_INFOTEX
-	if Spring.GetMapDrawMode() ~= nil then
-		table.insert(definitions, "#define HAVE_INFOTEX")
-		uniformsFloat["infoTexGen"] = { 1.0 / pwr2mapx, 1.0 / pwr2mapy }
-	end
-
-	-- HAVE_SHADOWS
-	if Spring.HaveShadows() then
-		table.insert(definitions, "#define HAVE_SHADOWS")
-	end
-
-	-- SMF_WATER_ABSORPTION
-	-- SMF_VOID_WATER
-	if gl.GetMapRendering("voidWater") then
-		table.insert(definitions, "#define SMF_VOID_WATER")
-	else
-		table.insert(definitions, "#define SMF_WATER_ABSORPTION")
-	end
-
-	-- SMF_VOID_GROUND
-	if gl.GetMapRendering("voidGround") then
-		table.insert(definitions, "#define SMF_VOID_GROUND")
-	end
-
-	-- SMF_DETAIL_TEXTURE_SPLATTING
-	if hasSplats and hasSplatsDistr then
-		table.insert(definitions, "#define SMF_DETAIL_TEXTURE_SPLATTING")
-	end
-
-	-- SMF_DETAIL_NORMAL_TEXTURE_SPLATTING
-	if hasDNTS and hasSplatsDistr then
-		table.insert(definitions, "#define SMF_DETAIL_NORMAL_TEXTURE_SPLATTING")
-	end
-
-	-- SSMF_UNCOMPRESSED_NORMALS
-	-- always compressed by default? Represent geometry normals!
-
-	-- BASE_DYNAMIC_MAP_LIGHT
-	-- MAX_DYNAMIC_MAP_LIGHTS
-	-- ^^ not supported yet, figure out what to do with them. NOSPRING defines these values
-
-	-- DEFERRED_MODE
-	-- ^^ not supported yet, figure out what to do with it
-
-	for k, v in pairs(mapSplats) do
-		if 		k == string.lower("texScales") then
-			uniformsFloat["splatTexScales"] = v
-		elseif 	k == string.lower("texMults") then
-			uniformsFloat["splatTexMults"] = v
-		end
-	end
-
-	for k, v in pairs(mapWater) do
-		if 		k == string.lower("minColor") then
-			uniformsFloat["waterMinColor"] = v
-		elseif 	k == string.lower("baseColor") then
-			uniformsFloat["waterBaseColor"] = v
-		elseif	k == string.lower("absorb") then
-			uniformsFloat["waterAbsorbColor"] = v
-		end
-	end
-
-	for k, v in pairs(mapLighting) do
-		if 		k == string.lower("groundAmbientColor") then
-			uniformsFloat["groundAmbientColor"] = { gl.GetSun("ambient") }
-		elseif 	k == string.lower("groundDiffuseColor") then
-			uniformsFloat["groundDiffuseColor"] = { gl.GetSun("diffuse") }
-		elseif	k == string.lower("groundSpecularColor") then
-			uniformsFloat["groundSpecularColor"] = { gl.GetSun("specular") }
-		elseif	k == string.lower("groundSpecularExponent") then
-			uniformsFloat["groundSpecularExponent"] = gl.GetSun("specularExponent")
-		elseif	k == string.lower("groundShadowDensity") then
-			uniformsFloat["groundShadowDensity"] = gl.GetSun("shadowDensity")
-		end
-	end
+	uniformsFloat["mapTexGen"] = { 1.0/Game.mapSizeX, 1.0/Game.mapSizeZ }
+	uniformsFloat["infoTexGen"] = { 1.0 / pwr2mapx, 1.0 / pwr2mapy }
 
 	if gl.HasExtension("GL_ARB_texture_non_power_of_two") then
 		uniformsFloat["normalTexGen"] = { 1.0/Game.mapSizeX, 1.0/Game.mapSizeZ }
@@ -374,99 +432,29 @@ local function GetFlagsTexturesUniforms()
 		uniformsFloat["normalTexGen"] = { 1.0/pwr2mapx, 1.0/pwr2mapy }
 	end
 
-	uniformsFloat["specularTexGen"] = { 1.0/Game.mapSizeX, 1.0/Game.mapSizeZ }
-
-	--uniformsFloat["infoTexIntensityMul"] = ((Spring.GetMapDrawMode() == "metal") and 1.0 or 0.0) + 1.0
-
-	local texUnitUniforms = {
-		diffuseTex = 0,
-		detailTex = 2,
-		shadowTex = 4,
-		normalsTex = 5,
-		specularTex = 6,
-		splatDetailTex = 7,
-		splatDistrTex = 8,
-		skyReflectModTex = 10,
-		blendNormalsTex = 11,
-		lightEmissionTex = 12,
-		parallaxHeightTex = 13,
-		infoTex = 14,
-		splatDetailNormalTex1 = 15,
-		splatDetailNormalTex2 = 16,
-		splatDetailNormalTex3 = 17,
-		splatDetailNormalTex4 = 18,
-	}
-
-	for k, v in pairs(texUnitUniforms) do
-		uniformsInt[k] = v
-	end
-
-	for k, v in pairs(definitions) do
-		definitions[k] = v .. "\n"
-	end
-
-	return definitions, uniformsFloat, uniformsInt, textures
-end
-
-
---  Gadget Global Vars  --
-local fwdShaderObjValid
-local fwdShaderObj
-
-local updateHeights
-
-local oldSunPos = {-1, -1, -1}
-local updateSunPos
-
-local firstTime
-local genBrdfLut
--- /Gadget Global Vars/ --
-
-local function InitGlobalVars()
-	fwdShaderObjValid = false
-	fwdShaderObj = nil
-
-	firstTime = true
-	updateHeights = true
-
-	oldSunPos = {-1, -1, -1}
-	updateSunPos = false
-
-	genBRDFLUT = nil
-end
-
-
-function gadget:Initialize()
-	if ParsePbrMapParams() == nil then
-		Spring.Echo("Map PBR is not enabled on this map, unloading gadget")
-		gadgetHandler:RemoveGadget()
-		return
-	else
-		Spring.Echo("Map PBR is enabled on this map, loading gadget")
-	end
-
-	InitGlobalVars()
-
 	local BRDFLUT_TEXDIM = 512 --512 is BRDF LUT texture size
 	genBrdfLut = GenBRDFLUT(BRDFLUT_TEXDIM)
 	genBrdfLut:Initialize()
 
-	local definitions, uniformsFloat, uniformsInt, textures = GetFlagsTexturesUniforms()
-
-	--GG.TableEcho({ definitions, uniformsFloat, uniformsInt, textures }, "GetFlagsTexturesUniforms")
-
-
 	local vertCode = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
-	local fragCode = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
+	local fragCodeTmpl = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
 
-	--Spring.Echo(vertCode, fragCode)
+	local fragCode = string.format("%s", fragCodeTmpl)
+	fragCode = fragCode:gsub("###CUSTOM_DEFINES###", customDefinitions)
+	fragCode = fragCode:gsub("###SAMPLER_UNIFORMS###", samplerUniformsCode)
+	fragCode = fragCode:gsub("###CUSTOM_CODE###", customCode)
+	fragCode = fragCode:gsub("###MATERIALS_VAR###", splatsVarCode)
+	fragCode = fragCode:gsub("###MATERIAL_WEIGHTS###", splatsWeightCode)
+	fragCode = fragCode:gsub("###MATERIAL_PARAMS###", splatsCode)
+
+	Spring.Echo("fragCode = \n\n\n\n", fragCode)
 
 	fwdShaderObj = LuaShader({
 		definitions = definitions,
 		vertex = vertCode,
 		fragment = fragCode,
 		uniformFloat = uniformsFloat,
-		uniformInt = uniformsInt,
+		uniformInt = boundSamplers,
 
 	}, "PBR Map Shader (Forward)")
 	fwdShaderObjValid = fwdShaderObj:Initialize()
@@ -515,53 +503,6 @@ local function UpdateSomeUniforms()
 	end)
 end
 
-local function BindTextures()
-	-- diffuseTex = 0,
-	-- ^^ Is bound by engine
-
-	-- detailTex = 2,
-	gl.Texture(2, "$detail")
-
-	-- shadowTex = 4,
-	gl.Texture(4, "$shadow")
-
-	-- normalsTex = 5,
-	gl.Texture(5, "$normals")
-
-	-- specularTex = 6,
-	gl.Texture(6, "$ssmf_specular")
-
-	-- splatDetailTex = 7,
-	gl.Texture(7, "$ssmf_splat_detail")
-
-	-- splatDistrTex = 8,
-	gl.Texture(8, "$ssmf_splat_distr")
-
-	-- skyReflectModTex = 10,
-	gl.Texture(10, "$sky_reflection")
-
-	-- blendNormalsTex = 11,
-	gl.Texture(11, "$ssmf_normals")
-
-	-- lightEmissionTex = 12,
-	gl.Texture(12, "$ssmf_emission")
-
-	-- parallaxHeightTex = 13,
-	gl.Texture(13, "$ssmf_parallax")
-
-	-- infoTex = 14,
-	gl.Texture(14, "$info")
-
-	-- splatDetailNormalTex1 = 15,
-	gl.Texture(15, "$ssmf_splat_normals:0")
-	-- splatDetailNormalTex2 = 16,
-	gl.Texture(16, "$ssmf_splat_normals:1")
-	-- splatDetailNormalTex3 = 17,
-	gl.Texture(17, "$ssmf_splat_normals:2")
-	-- splatDetailNormalTex4 = 18,
-	gl.Texture(18, "$ssmf_splat_normals:3")
-end
-
 function gadget:GotChatMsg(msg, player)
 	local pbrmapFound = string.find(msg, "pbrmap")
 	if pbrmapFound == nil then
@@ -586,9 +527,9 @@ function gadget:GotChatMsg(msg, player)
 				Spring.SetMapShader(fwdShaderObj:GetHandle(), 0)
 			end
 		elseif	pbrmapReloadFound then
-			Spring.Echo("Reloading map PBR gadget")
-			gadget:Shutdown()
-			gadget:Initialize()
+			--Spring.Echo("Reloading map PBR gadget")
+			--gadget:Shutdown()
+			--gadget:Initialize()
 			--gadgetHandler:ToggleGadget(gadget:GetInfo().name)
 		end
 	end
@@ -604,6 +545,19 @@ function gadget:DrawWorldShadow()
 
 end
 
+
+local function BindTextures()
+	gl.Texture(29, genBrdfLut:GetTexture())
+	gl.Texture(30, "$normals")
+	gl.Texture(31, "$reflection")
+
+	if boundTexUnits then
+		for tun, def in pairs(boundTexUnits) do
+			gl.Texture(tun, def)
+		end
+	end
+end
+
 -- Shadow matrix and shadow params are wrong here!!!
 -- Use gadget:DrawWorldShadow() for shadows instead
 -- TODO make sure DrawGroundPreForward is mapped
@@ -611,8 +565,7 @@ function gadget:DrawGroundPreForward()
 	if fwdShaderObjValid then
 		CallAsTeam(Spring.GetMyTeamID(),  function()
 			UpdateSomeUniforms()
-			--BindTextures()
-			-- ^^ somehow bound by engine
+			BindTextures()
 		end)
 	end
 end
@@ -623,10 +576,6 @@ function gadget:Shutdown()
 	genBrdfLut:Finalize()
 	if fwdShaderObjValid then
 		fwdShaderObj:Finalize()
-
-		fwdShaderObjValid = false
-		fwdShaderObj = nil
-
 		Spring.SetMapShader(0, 0)
 	end
 end

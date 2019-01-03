@@ -1,3 +1,7 @@
+###SAMPLER_UNIFORMS###
+
+#define tex(num) tex##num
+
 struct MaterialInfo {
 	vec3 baseColor;
 	vec3 emissionColor;
@@ -11,9 +15,7 @@ struct MaterialInfo {
 	float metallic;
 };
 
-MaterialInfo GetMaterialInfo%%SPLAT_NUM%%(vec2 mapUV) {
 
-}
 
 //#define AVOID_SPLATSWEIGHT_BRANCHING
 
@@ -51,9 +53,6 @@ float splatWeights[%%SPLAT_COUNT%%];
 void FillSplatsWeights(vec2 straightMapUV) {
 	vec2 flippedMapUV = vec2(straightMapUV.s, 1.0 - straightMapUV.t); //flip vertical component
 	
-	#ifdef HAS_DEFAULT_SPLAT
-		splatWeights[0] = 0.0; // Don't trust compiler to assign this to 0.0 for us. Better safe, than sorry
-	#endif
 	%%READ_WEIGHT_TEXTURES%%
 	
 	float weightsSum = 0.0;

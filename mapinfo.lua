@@ -252,7 +252,7 @@ local mapinfo = {
 		pbr = {
 			enabled = true,
 			textures = {
-				["icedist.dds"] = 20,
+				[20] = "icedist.dds",
 			},
 			splats = {
 				{ },

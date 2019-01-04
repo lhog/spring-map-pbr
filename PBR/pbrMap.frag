@@ -29,6 +29,7 @@ const float MINROUGHNESS = 0.04;
 
 uniform sampler2D diffuseTex;
 uniform sampler2D terrainNormalsTex;
+uniform sampler2D infoTex;
 uniform sampler2D brdfLUTTex;
 uniform samplerCube reflectionTex;
 

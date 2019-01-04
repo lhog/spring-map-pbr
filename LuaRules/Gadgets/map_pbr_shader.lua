@@ -415,9 +415,13 @@ function gadget:Initialize()
 	end
 
 	boundSamplers["diffuseTex"] = 0
-	boundSamplers["brdfLUTTex"] = 29
-	boundSamplers["terrainNormalsTex"] = 30
-	boundSamplers["reflectionTex"] = 31
+	
+	boundSamplers["shadowTex"] = 27
+	boundSamplers["infoTex"] = 28
+	boundSamplers["terrainNormalsTex"] = 29
+	boundSamplers["reflectionTex"] = 30
+	boundSamplers["brdfLUTTex"] = 31	
+	
 	--Table.Echo(boundSamplers, "boundSamplers")
 
 	uniformsFloat = {}
@@ -547,9 +551,12 @@ end
 
 
 local function BindTextures()
-	gl.Texture(29, genBrdfLut:GetTexture())
-	gl.Texture(30, "$normals")
-	gl.Texture(31, "$reflection")
+	
+	gl.Texture(27, "$shadow")
+	gl.Texture(28, "$info")
+	gl.Texture(29, "$normals")
+	gl.Texture(30, "$reflection")
+	gl.Texture(31, genBrdfLut:GetTexture())
 
 	if boundTexUnits then
 		for tun, def in pairs(boundTexUnits) do

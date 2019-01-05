@@ -11,21 +11,19 @@ uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
 
 out Data {
 	vec4 vertexWorldPos;
+	vec3 viewDir;
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
 	vec2 infoTexCoords;
 
-	vec3 halfDir;
 	float fogFactor;
 };
 
 void main() {
 	// calc some lighting variables
-	vec3 viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
-	viewDir = normalize(viewDir - gl_Vertex.xyz);
-
-	halfDir = normalize(lightDir.xyz + viewDir);
+	viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
+	viewDir = viewDir - gl_Vertex.xyz;
 
 	vertexWorldPos = gl_Vertex;
 

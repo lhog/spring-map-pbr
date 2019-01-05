@@ -252,13 +252,35 @@ local mapinfo = {
 		pbr = {
 			enabled = true,
 			textures = {
+				[2] = "Ice_001/Ice_001_COLOR.jpg",
+				[3] = "Ice_001/Ice_001_SPEC.jpg",
+				[4] = "Ice_001/Ice_001_NRM.jpg",
+
+				--[3] = "Blue_Ice_001_SD/Blue_Ice_001_COLOR.jpg",
 				[20] = "icedist.dds",
 			},
+			definitions = {
+				["SUN_COLOR"] = "vec3(1.0)",
+			},
 			splats = {
-				{ },
-				{ },
-				{ },
-				{ },
+				{
+					workflow = "SPECULAR",
+					--specularF0 = "0.01",
+					weight = "1.0", --texture(tex20, mapTexCoords).r;
+					diffuseColor = "fromSRGB(texture(tex2, 3.0 * mapTexCoords).rgb)",
+					specularColor = "fromSRGB(texture(tex3, 3.0 * mapTexCoords).rgb)",
+					--blendNormal = "texture(tex4, 1.0 * mapTexCoords).xyz",
+					--blendNormalStrength = "vec3(0.0)",
+					roughness = "0.0",
+				},
+				--[[
+				{
+					weight = "texture(tex20, mapTexCoords).g;",
+					baseColor = "texture(tex3, mapTexCoords).rgb;",
+				},
+				]]--
+				--{ },
+				--{ },
 			},
 		},
 	},

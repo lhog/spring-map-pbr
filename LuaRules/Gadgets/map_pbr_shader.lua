@@ -128,39 +128,67 @@ end
 local pbrSplatDefaults = {
 	workflow = "METALNESS",
 
-	weight = "0.0;",
+	weight = "0.0",
 
-	diffuseColor = "vec3(0.0);", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
-	specularColor = "vec3(0.0);", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	diffuseColor = "vec3(0.0)", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	specularColor = "vec3(0.0)", -- Only in use when workflow == SPECULAR. Use fromSRGB() in case textures are in non-linear (sRGB) space.
 
-	baseColor = "vec3(0.0);", -- Only in use when workflow == METALNESS. Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	baseColor = "vec3(0.0)", -- Only in use when workflow == METALNESS. Use fromSRGB() in case textures are in non-linear (sRGB) space.
 
-	blendNormal = "vec3(0.0);", -- TBN space normals, that will be blended into map normals
-	height = "0.0;", -- Used for height based blending and POM
-	pomScale = "0.0;",
-	emissionColor = "vec3(0.0);", -- Use fromSRGB() in case textures are in non-linear (sRGB) space.
-	occlusion = "1.0;", -- 1.0 is unoccluded.
-	specularF0 = "0.04;", -- More often than not you won't be using this.
-	roughness = "0.0;", -- To convert from glossiness use 1.0 - <glossiness>
+	blendNormal = "vec3(0.5, 0.5, 1.0)", -- TBN space normals, that will be blended into map normals
+	blendNormalStrength = "vec3(1.0)",
 
-	metalness = "0.0;", -- Only in use when workflow == METALNESS.
+	height = "0.0", -- Used for height based blending and POM
+	pomScale = "0.0",
+	emissionColor = "vec3(0.0)", -- Use fromSRGB() in case textures are in non-linear (sRGB) space.
+	occlusion = "1.0", -- 1.0 is unoccluded.
+	specularF0 = "0.04", -- More often than not you won't be using this.
+	roughness = "0.0", -- To convert from glossiness use 1.0 - <glossiness>
+
+	metalness = "0.0", -- Only in use when workflow == METALNESS.
 }
 
+local function LuaToGLSL(luaData)
+	local ldt = type(luaData)
+	if ldt == "table" then
+		N = #luaData
+		if (N == 1) then
+			return string.format("%.1f", luaData[1])
+		elseif (N == 2) then
+			return string.format("vec2(%.1f, %.1f)", luaData[1], luaData[2])
+		elseif (N == 3) then
+			return string.format("vec3(%.1f, %.1f, %.1f)", luaData[1], luaData[2], luaData[3])
+		elseif (N == 4) then
+			return string.format("vec4(%.1f, %.1f, %.1f, %.1f)", luaData[1], luaData[2], luaData[3], luaData[4])
+		else
+			return nil
+		end
+	elseif ldt == "number" then
+		return string.format("%.1f", luaData)
+	else
+		return string.format("%.1f", tonumber(luaData))
+	end
+end
+
 local pbrMapDefaultDefinitions = {
+	["SUN_COLOR"] = LuaToGLSL({gl.GetSun("diffuse")}),
 	["FAST_GAMMA"] = "0",
 	["WEIGHT_CUTOFF"] = "10.0/255.0",
 	["POM_MAXSTEPS"] = "32",
+	["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THIN",
 	["MAT_BLENDING"] = "MAT_BLENDING_WEIGHT",
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
-	["IBL_INVERSE_TONEMAP(color)"] = "color", -- Might want to use expExpand(). See details in the shader code
+	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
+	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
+	["IBL_INVERSE_TONEMAP"] = "0", -- Actiavtes expExpand()
+	["IBL_INVERSE_TONEMAP_MUL"] = "1.0", -- expExpand() mul param
 	["IBL_SCALE_DIFFUSE(color)"] = "color",
 	["IBL_SCALE_SPECULAR(color)"] = "color",
 }
 
 local pbrMapDefaults = {
-	finalColor = "toSRGB(postTMColor);",
-	definitions = pbrMapDefaultDefinitions,
+	definitions = {},
 	customCode = "",
 	splats = {},
 	textures = {
@@ -208,52 +236,53 @@ local function ParseTextures(pbrMap)
 	return boundTexUnits
 end
 
-local specularWFSplatTemplate = [[
-	{
+local specularWFSplatTemplate =
+[[	{
 		const float epsilon = 1e-6;
 
-		vec3 diffuseColor = ###DIFFUSE_COLOR###
-		vec3 specularColor = ###SPECULAR_COLOR###
+		vec3 diffuseColor = ###DIFFUSE_COLOR###;
+		vec3 specularColor = ###SPECULAR_COLOR###;
 		float maxSpecular = max(max(specularColor.r, specularColor.g), specularColor.b);
 
-		float specularF0 = ###SPECULAR_F0###
+		float specularF0 = ###SPECULAR_F0###;
 		float metalness = ConvertToMetalness(diffuseColor, specularColor, maxSpecular, specularF0);
 
-		vec3 baseColorDiffusePart = diffuseColor.rgb * ((1.0 - maxSpecular) / (1 - specularF0) / max(1.0 - metalness, epsilon));
+		vec3 baseColorDiffusePart = diffuseColor * ((1.0 - maxSpecular) / (1 - specularF0) / max(1.0 - metalness, epsilon));
 		vec3 baseColorSpecularPart = specularColor - (vec3(specularF0) * (1.0 - metalness) * (1.0 / max(metalness, epsilon)));
 
 		vec3 baseColor = mix(baseColorDiffusePart, baseColorSpecularPart, metalness * metalness);
 		baseColor = clamp( baseColor, vec3(0.0), vec3(1.0) );
 
-		material[###MAT_NUM###].baseColor = vec4(baseColor, diffuseColor.a);
+		material[###MAT_NUM###].baseColor = baseColor;
 
-		material[###MAT_NUM###].blendNormal = ###BLEND_NORMALS###
-		material[###MAT_NUM###].height = ###HEIGHT###
-		material[###MAT_NUM###].pomScale = ###POM_SCALE###
-		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###
-		material[###MAT_NUM###].occlusion = ###OCCLUSION###
-		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###
-		material[###MAT_NUM###].roughness = ###ROUGHNESS###
+		material[###MAT_NUM###].blendNormal = UnpackNormals(###BLEND_NORMAL###) * ###BLEND_NORMAL_STRENGTH###;
+
+		material[###MAT_NUM###].height = ###HEIGHT###;
+		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
+		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
+		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
+		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###;
+		material[###MAT_NUM###].roughness = ###ROUGHNESS###;
 
 		material[###MAT_NUM###].metalness = metalness;
-	}
-]]
+	}]]
 
-local metalnessWFSplatTemplate = [[
-	{
-		material[###MAT_NUM###].baseColor = ###BASE_COLOR###
+local metalnessWFSplatTemplate =
+[[	{
+		material[###MAT_NUM###].baseColor = ###BASE_COLOR###;
 
-		material[###MAT_NUM###].blendNormal = ###BLEND_NORMALS###
-		material[###MAT_NUM###].height = ###HEIGHT###
-		material[###MAT_NUM###].pomScale = ###POM_SCALE###
-		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###
-		material[###MAT_NUM###].occlusion = ###OCCLUSION###
-		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###
-		material[###MAT_NUM###].roughness = ###ROUGHNESS###
+		material[###MAT_NUM###].blendNormal = UnpackNormals(###BLEND_NORMAL###) * ###BLEND_NORMAL_STRENGTH###;
 
-		material[###MAT_NUM###].metalness = ###METALNESS###
-	}
-]]
+		material[###MAT_NUM###].height = ###HEIGHT###;
+		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
+		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
+		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
+		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###;
+		material[###MAT_NUM###].roughness = ###ROUGHNESS###;
+
+		material[###MAT_NUM###].metalness = ###METALNESS###;
+	}]]
+
 
 local function ParseSplats(pbrMap)
 	local hasDefaultSplat = false
@@ -274,7 +303,7 @@ local function ParseSplats(pbrMap)
 			end
 		end
 
-		splatsWeightCode = splatsWeightCode .. string.format("\tmaterial[%d].weight = %s\n", splatNum, splatDef.weight)
+		splatsWeightCode = splatsWeightCode .. string.format("\tmaterial[%d].weight = %s;\n", splatNum, splatDef.weight)
 
 		local splatCode = ""
 
@@ -285,7 +314,9 @@ local function ParseSplats(pbrMap)
 
 			splatCode = splatCode:gsub("###BASE_COLOR###", splatDef.baseColor)
 
-			splatCode = splatCode:gsub("###BLEND_NORMALS###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###BLEND_NORMAL###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###BLEND_NORMAL_STRENGTH###", splatDef.blendNormalStrength)
+
 			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
 			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
 			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
@@ -303,7 +334,9 @@ local function ParseSplats(pbrMap)
 			splatCode = splatCode:gsub("###DIFFUSE_COLOR###", splatDef.diffuseColor)
 			splatCode = splatCode:gsub("###SPECULAR_COLOR###", splatDef.specularColor)
 
-			splatCode = splatCode:gsub("###BLEND_NORMALS###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###BLEND_NORMAL###", splatDef.blendNormal)
+			splatCode = splatCode:gsub("###BLEND_NORMAL_STRENGTH###", splatDef.blendNormalStrength)
+
 			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
 			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
 			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
@@ -342,6 +375,11 @@ local function ParseEverything()
 	-- merge pbrMap with defaults
 	pbrMap = Table.MergeWithDefaults(pbrMap, pbrMapDefaults)
 
+	-- replace lowercased values with camelCase. Whereever we can.
+	pbrMap.definitions = Table.RestoreKeysCase(pbrMap.definitions, pbrMapDefaultDefinitions)
+	-- merge pbrMap with defaults
+	pbrMap.definitions = Table.MergeWithDefaults(pbrMap.definitions, pbrMapDefaultDefinitions)
+
 	local splatsList = {}
 	for splatName, _ in pairs(pbrMap.splats) do
 		table.insert(splatsList, splatName)
@@ -373,17 +411,7 @@ local function ParseEverything()
 		customDefinitions = customDefinitions .. string.format("#define %s %s\n", defKey, defVal)
 	end
 
-	splatsVarCode = string.format("MaterialInfo material[%d];", splatCount)
-
-	--Table.Echo({splatsCode=splatsCode, splatsWeightCode=splatsWeightCode, hasDefaultSplat=hasDefaultSplat, splatCount=splatCount}, "ParseSplats")
-
-	--Spring.Echo("samplerUniformsCode", samplerUniformsCode)
-
-	--Spring.Echo("splatsCode", splatsCode)
-	--Spring.Echo("splatsWeightCode", splatsWeightCode)
-	--Spring.Echo("customDefinitions", customDefinitions)
-
-	return samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode, customDefinitions, pbrMap.customCode, boundTexUnits
+	return samplerUniformsCode, splatsCode, splatsWeightCode, customDefinitions, pbrMap.customCode, splatCount, boundTexUnits
 end
 
 
@@ -404,10 +432,10 @@ local boundTexUnits = nil
 
 function gadget:Initialize()
 
-	local samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode, customDefinitions, customCode
+	local samplerUniformsCode, splatsCode, splatsWeightCode, customDefinitions, customCode, splatCount
 
-	samplerUniformsCode, splatsVarCode, splatsCode, splatsWeightCode,
-	customDefinitions, customCode, boundTexUnits = ParseEverything()
+	samplerUniformsCode, splatsCode, splatsWeightCode,
+	customDefinitions, customCode, splatCount, boundTexUnits = ParseEverything()
 
 	local boundSamplers = {}
 	for tun, _ in pairs(boundTexUnits) do
@@ -415,13 +443,13 @@ function gadget:Initialize()
 	end
 
 	boundSamplers["diffuseTex"] = 0
-	
+
 	boundSamplers["shadowTex"] = 27
 	boundSamplers["infoTex"] = 28
 	boundSamplers["terrainNormalsTex"] = 29
 	boundSamplers["reflectionTex"] = 30
-	boundSamplers["brdfLUTTex"] = 31	
-	
+	boundSamplers["brdfTex"] = 31
+
 	--Table.Echo(boundSamplers, "boundSamplers")
 
 	uniformsFloat = {}
@@ -447,7 +475,7 @@ function gadget:Initialize()
 	fragCode = fragCode:gsub("###CUSTOM_DEFINES###", customDefinitions)
 	fragCode = fragCode:gsub("###SAMPLER_UNIFORMS###", samplerUniformsCode)
 	fragCode = fragCode:gsub("###CUSTOM_CODE###", customCode)
-	fragCode = fragCode:gsub("###MATERIALS_VAR###", splatsVarCode)
+	fragCode = fragCode:gsub("###MATERIALS_COUNT###", splatCount)
 	fragCode = fragCode:gsub("###MATERIAL_WEIGHTS###", splatsWeightCode)
 	fragCode = fragCode:gsub("###MATERIAL_PARAMS###", splatsCode)
 
@@ -484,7 +512,12 @@ end
 
 local function UpdateSomeUniforms()
 	if firstTime then
-		genBrdfLut:Execute(false)
+		--genBrdfLut:Execute(true)
+		gl.PushPopMatrix(function()
+			gl.MatrixMode(GL.PROJECTION); gl.LoadIdentity();
+			gl.MatrixMode(GL.MODELVIEW); gl.LoadIdentity();
+			genBrdfLut:Execute(false)
+		end)
 		firstTime = false
 	end
 
@@ -498,6 +531,7 @@ local function UpdateSomeUniforms()
 		if updateSunPos then
 			local sunPosX, sunPosY, sunPosZ = gl.GetSun("pos")
 			fwdShaderObj:SetUniformFloatAlways("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
+			Spring.Echo("sunPos", sunPosX, sunPosY, sunPosZ)
 			updateSunPos = false
 		end
 
@@ -551,7 +585,7 @@ end
 
 
 local function BindTextures()
-	
+
 	gl.Texture(27, "$shadow")
 	gl.Texture(28, "$info")
 	gl.Texture(29, "$normals")

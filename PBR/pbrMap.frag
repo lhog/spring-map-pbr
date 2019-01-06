@@ -421,28 +421,30 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	float reflectionTexMaxLOD = log2(float(max(reflectionTexSize.x, reflectionTexSize.y)));
 	float specularLOD = reflectionTexMaxLOD * roughness;
 
-	// It's wrong to sample diffuse irradiance from reflection texture.
-	// But alternative (convolution to irradiance) is too performance hungry (???)
-	// Sample from "blurry" 16x16 texels mip level, so it looks more or less like irradiance
-
-	#if 1
+	#if (IBL_DIFFUSECOLOR_STATIC == 1)
+		vec3 iblDiffuseLight = IBL_DIFFUSECOLOR;
+	#else
+		// It's wrong to sample diffuse irradiance from reflection texture.
+		// But alternative (convolution to irradiance) is too performance hungry (???)
+		// Sample from "blurry" 16x16 texels mip level, so it looks more or less like irradiance
 		vec3 iblDiffuseLight = textureLod(reflectionTex, N, reflectionTexMaxLOD - 4.0).rgb;
 		iblDiffuseLight = IBL_GAMMACORRECTION(iblDiffuseLight);
+		#if (IBL_INVERSE_TONEMAP == 1)
+			float avgDLum = dot(LUMA, textureLod(reflectionTex, N, reflectionTexMaxLOD).rgb);
+			iblDiffuseLight = expExpand(iblDiffuseLight, avgDLum, IBL_INVERSE_TONEMAP_MUL);
+		#endif
+	#endif
 
+	#if (IBL_SPECULARCOLOR_STATIC == 1)
+		vec3 iblSpecularLight = IBL_SPECULARCOLOR;
+	#else
 		// Get reflection with respect to surface roughness
 		vec3 iblSpecularLight = textureLod(reflectionTex, R, specularLOD).rgb;
 		iblSpecularLight = IBL_GAMMACORRECTION(iblSpecularLight);
-
 		#if (IBL_INVERSE_TONEMAP == 1)
-			// TODO: text lower LOD levels
-			float avgDLum = dot(LUMA, textureLod(reflectionTex, N, reflectionTexMaxLOD).rgb);
 			float avgSLum = dot(LUMA, textureLod(reflectionTex, R, reflectionTexMaxLOD).rgb);
-			iblDiffuseLight = expExpand(iblDiffuseLight, avgDLum, IBL_INVERSE_TONEMAP_MUL);
 			iblSpecularLight = expExpand(iblSpecularLight, avgSLum, IBL_INVERSE_TONEMAP_MUL);
 		#endif
-	#else
-		vec3 iblDiffuseLight = vec3(1.0);
-		vec3 iblSpecularLight = vec3(1.0);
 	#endif
 
 	iblDiffuseLight = IBL_SCALE_DIFFUSE(iblDiffuseLight);
@@ -625,6 +627,8 @@ void main() {
 		// gl_FragDepth = gl_FragCoord.z / gl_FragCoord.w;
 	#else
 		gl_FragColor.rgb = mix(gl_Fog.color.rgb, gl_FragColor.rgb, fromVS.fogFactor);
+		gl_FragColor.rgb = OUTPUT_EXPOSURE(gl_FragColor.rgb);
+		gl_FragColor.rgb = OUTPUT_TONEMAPPING(gl_FragColor.rgb);
 		gl_FragColor.rgb = OUTPUT_GAMMACORRECTION(gl_FragColor.rgb);
 	#endif
 }

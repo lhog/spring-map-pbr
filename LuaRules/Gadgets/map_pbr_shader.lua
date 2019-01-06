@@ -180,9 +180,10 @@ local pbrMapDefaultDefinitions = {
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
+	["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)";  -- replaces IBL diffuse sampling result with color value defined here
+	["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)"; -- replaces IBL specular sampling result with color value defined here
 	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
-	["IBL_INVERSE_TONEMAP"] = "0", -- Actiavtes expExpand()
-	["IBL_INVERSE_TONEMAP_MUL"] = "1.0", -- expExpand() mul param
+	["IBL_INVERSE_TONEMAP_MUL"] = "", -- expExpand() mul param
 	["IBL_SCALE_DIFFUSE(color)"] = "color",
 	["IBL_SCALE_SPECULAR(color)"] = "color",
 }
@@ -404,6 +405,18 @@ local function ParseEverything()
 
 	local splatsCode, splatsWeightCode, hasDefaultSplat, splatCount = ParseSplats(pbrMap)
 	pbrMap.definitions["HAS_DEFAULT_SPLAT"] = (hasDefaultSplat and "1") or "0"
+
+	if pbrMap.definitions["IBL_INVERSE_TONEMAP_MUL"] ~= "" then
+		pbrMap.definitions["IBL_INVERSE_TONEMAP"] = "1"
+	end
+
+	if pbrMap.definitions["IBL_DIFFUSECOLOR"] ~= "" then
+		pbrMap.definitions["IBL_DIFFUSECOLOR_STATIC"] = "1"
+	end
+
+	if pbrMap.definitions["IBL_SPECULARCOLOR"] ~= "" then
+		pbrMap.definitions["IBL_SPECULARCOLOR_STATIC"] = "1"
+	end
 
 
 	local customDefinitions = ""

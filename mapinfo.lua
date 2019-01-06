@@ -261,17 +261,20 @@ local mapinfo = {
 			},
 			definitions = {
 				["SUN_COLOR"] = "vec3(1.0)",
+				--["OUTPUT_EXPOSURE(preExpColor)"] = "1.4 * preExpColor",
+				--["OUTPUT_TONEMAPPING(preTMColor)"] = "Uncharted2TM(preTMColor)"
 			},
 			splats = {
 				{
 					workflow = "SPECULAR",
 					--specularF0 = "0.01",
-					weight = "1.0", --texture(tex20, mapTexCoords).r;
+					weight = "1.0",
+					--weight = "texture(tex20, mapTexCoords).r",
 					diffuseColor = "fromSRGB(texture(tex2, 3.0 * mapTexCoords).rgb)",
 					specularColor = "fromSRGB(texture(tex3, 3.0 * mapTexCoords).rgb)",
 					--blendNormal = "texture(tex4, 1.0 * mapTexCoords).xyz",
 					--blendNormalStrength = "vec3(0.0)",
-					roughness = "0.0",
+					roughness = "0.5",
 				},
 				--[[
 				{

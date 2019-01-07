@@ -469,7 +469,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 		// It's wrong to sample diffuse irradiance from reflection texture.
 		// But alternative (convolution to irradiance) is too performance hungry (???)
 		// Sample from "blurry" 16x16 texels mip level, so it looks more or less like irradiance
-		vec3 iblDiffuseLight = textureLod(reflectionTex, N, reflectionTexMaxLOD - 4.0).rgb;
+		vec3 iblDiffuseLight = texture(reflectionTex, N, reflectionTexMaxLOD - 4.0).rgb;
 		iblDiffuseLight = IBL_GAMMACORRECTION(iblDiffuseLight);
 		#if (IBL_INVERSE_TONEMAP == 1)
 			float avgDLum = dot(LUMA, textureLod(reflectionTex, N, reflectionTexMaxLOD).rgb);
@@ -481,7 +481,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 		vec3 iblSpecularLight = IBL_SPECULARCOLOR;
 	#else
 		// Get reflection with respect to surface roughness
-		vec3 iblSpecularLight = textureLod(reflectionTex, R, specularLOD).rgb;
+		vec3 iblSpecularLight = texture(reflectionTex, R, specularLOD).rgb;
 		iblSpecularLight = IBL_GAMMACORRECTION(iblSpecularLight);
 		#if (IBL_INVERSE_TONEMAP == 1)
 			float avgSLum = dot(LUMA, textureLod(reflectionTex, R, reflectionTexMaxLOD).rgb);

@@ -280,7 +280,7 @@ local mapinfo = {
 					occlusion = "pow(texture(tex5, 3.0 * mapTexCoords).r, 4)",
 					blendNormal = "texture(tex4, 3.0 * mapTexCoords).xyz",
 					--blendNormalStrength = "vec3(0.0)",
-					roughness = "0.55",
+					roughness = "0.1",
 				},
 				--[[
 				{

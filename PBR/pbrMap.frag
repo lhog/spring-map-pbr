@@ -501,9 +501,8 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
 
-	return (sunLitDiffColor + sunLitSpecColor) + (iblLitDiffColor + iblLitSpecColor);
+	return (sunLitDiffColor + iblLitDiffColor) * mat.occlusion + (sunLitSpecColor + iblLitSpecColor);
 	//return iblLitSpecColor;
-
 }
 
 /***********************************************************************/
@@ -542,7 +541,7 @@ vec3 GetTerrainNormal(vec2 uv) {
 	return normal;
 }
 
-#line 20502
+#line 20544
 
 void main() {
 
@@ -615,8 +614,8 @@ void main() {
 		clamp(dot(V, H), 0.0, 1.0)		//vdi.VdotH
 	);
 
-	float shadowMix = 0.0;
-	float shadowN = 0.0;
+	float shadowMix = 1.0;
+	float shadowN = 1.0;
 
 	for (int i = 0; i < MAT_COUNT; ++i) {
 		// TODO: review (material[i].weight >= WEIGHT_CUTOFF) impact
@@ -637,8 +636,8 @@ void main() {
 			vdi.NdotV = clamp(abs(dot(N, V)), 0.001, 1.0);
 			vdi.NdotH = clamp(dot(N, H), 0.0, 1.0);
 
-			shadowMix = max(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
-			shadowN = max(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
+			shadowMix = min(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
+			shadowN = min(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
 
 			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;
 		}

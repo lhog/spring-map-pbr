@@ -255,13 +255,14 @@ local mapinfo = {
 				[2] = "Ice_001/Ice_001_COLOR.jpg",
 				[3] = "Ice_001/Ice_001_SPEC.jpg",
 				[4] = "Ice_001/Ice_001_NRM.jpg",
+				[5] = "Ice_001/Ice_001_OCC.jpg",
 
 				--[3] = "Blue_Ice_001_SD/Blue_Ice_001_COLOR.jpg",
 				[20] = "icedist.dds",
 			},
 			definitions = {
 				["SUN_COLOR"] = "vec3(1.0)",
-				["SHADOW_SAMPLES"] = "11",
+				["SHADOW_SAMPLES"] = "3",
 				--["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				--["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				
@@ -276,9 +277,10 @@ local mapinfo = {
 					--weight = "texture(tex20, mapTexCoords).r",
 					diffuseColor = "fromSRGB(texture(tex2, 3.0 * mapTexCoords).rgb)",
 					specularColor = "fromSRGB(texture(tex3, 3.0 * mapTexCoords).rgb)",
-					--blendNormal = "texture(tex4, 1.0 * mapTexCoords).xyz",
+					occlusion = "pow(texture(tex5, 3.0 * mapTexCoords).r, 4)",
+					blendNormal = "texture(tex4, 3.0 * mapTexCoords).xyz",
 					--blendNormalStrength = "vec3(0.0)",
-					roughness = "0.5",
+					roughness = "0.55",
 				},
 				--[[
 				{

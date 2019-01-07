@@ -1,12 +1,16 @@
 #version 150 compatibility
 #define SMF_TEXSQR_SIZE 1024.0
 
+###CUSTOM_DEFINITIONS###
+
 uniform ivec2 texSquare;
 uniform vec4 lightDir;       // mapInfo->light.sunDir
 
 uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
 uniform vec2 mapTexGen; // 1.0/mapSize
-uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
+#if (HAVE_INFOTEX == 1)
+	uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
+#endif
 
 
 out Data {
@@ -15,7 +19,9 @@ out Data {
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
+#if (HAVE_INFOTEX == 1)	
 	vec2 infoTexCoords;
+#endif
 
 	float fogFactor;
 };
@@ -31,7 +37,9 @@ void main() {
 	diffuseTexCoords = (floor(vertexWorldPos.xz) / SMF_TEXSQR_SIZE) - vec2(texSquare);
 	normalTexCoords = vertexWorldPos.xz * normalTexGen;
 	mapTexCoords = vertexWorldPos.xz * mapTexGen;
+#if (HAVE_INFOTEX == 1)		
 	infoTexCoords = vertexWorldPos.xz * infoTexGen;
+#endif
 
 	// transform vertex pos
 	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;

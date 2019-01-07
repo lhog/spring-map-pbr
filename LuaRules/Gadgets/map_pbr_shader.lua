@@ -180,8 +180,9 @@ local pbrMapDefaultDefinitions = {
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
-	["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)";  -- replaces IBL diffuse sampling result with color value defined here
-	["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)"; -- replaces IBL specular sampling result with color value defined here
+	["SHADOW_SAMPLES"] = "1", --number of shadow map samples, "1" will revert to standard spring shadows
+	["IBL_DIFFUSECOLOR"] = "",  -- replaces IBL diffuse sampling result with color value defined here
+	["IBL_SPECULARCOLOR"] = "", -- replaces IBL specular sampling result with color value defined here
 	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
 	["IBL_INVERSE_TONEMAP_MUL"] = "", -- expExpand() mul param
 	["IBL_SCALE_DIFFUSE(color)"] = "color",
@@ -418,6 +419,17 @@ local function ParseEverything()
 		pbrMap.definitions["IBL_SPECULARCOLOR_STATIC"] = "1"
 	end
 
+	-- Standard spring definitions
+	-- HAVE_INFOTEX
+	if Spring.GetMapDrawMode() ~= nil then
+		pbrMap.definitions["HAVE_INFOTEX"] = "1"
+	end
+
+	-- HAVE_SHADOWS
+	if Spring.HaveShadows() then
+		pbrMap.definitions["HAVE_SHADOWS"] = "1"
+	end
+
 
 	local customDefinitions = ""
 	for defKey, defVal in pairs(pbrMap.definitions) do
@@ -477,21 +489,27 @@ function gadget:Initialize()
 		uniformsFloat["normalTexGen"] = { 1.0/pwr2mapx, 1.0/pwr2mapy }
 	end
 
+	uniformsFloat["groundShadowDensity"] = gl.GetSun("shadowDensity")
+
 	local BRDFLUT_TEXDIM = 512 --512 is BRDF LUT texture size
 	genBrdfLut = GenBRDFLUT(BRDFLUT_TEXDIM)
 	genBrdfLut:Initialize()
 
-	local vertCode = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
+	local vertCodeTmpl = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
 	local fragCodeTmpl = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
+	
+	local vertCode = string.format("%s", vertCodeTmpl)
+	vertCode = vertCode:gsub("###CUSTOM_DEFINITIONS###", customDefinitions)
 
 	local fragCode = string.format("%s", fragCodeTmpl)
-	fragCode = fragCode:gsub("###CUSTOM_DEFINES###", customDefinitions)
+	fragCode = fragCode:gsub("###CUSTOM_DEFINITIONS###", customDefinitions)
 	fragCode = fragCode:gsub("###SAMPLER_UNIFORMS###", samplerUniformsCode)
 	fragCode = fragCode:gsub("###CUSTOM_CODE###", customCode)
 	fragCode = fragCode:gsub("###MATERIALS_COUNT###", splatCount)
 	fragCode = fragCode:gsub("###MATERIAL_WEIGHTS###", splatsWeightCode)
 	fragCode = fragCode:gsub("###MATERIAL_PARAMS###", splatsCode)
 
+	Spring.Echo("vertCode = \n\n\n\n", vertCode)
 	Spring.Echo("fragCode = \n\n\n\n", fragCode)
 
 	fwdShaderObj = LuaShader({

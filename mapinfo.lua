@@ -261,6 +261,10 @@ local mapinfo = {
 			},
 			definitions = {
 				["SUN_COLOR"] = "vec3(1.0)",
+				["SHADOW_SAMPLES"] = "11",
+				--["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)",
+				--["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)",
+				
 				--["OUTPUT_EXPOSURE(preExpColor)"] = "1.4 * preExpColor",
 				--["OUTPUT_TONEMAPPING(preTMColor)"] = "Uncharted2TM(preTMColor)"
 			},

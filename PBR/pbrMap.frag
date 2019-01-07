@@ -1,6 +1,6 @@
 #version 150 compatibility
 /***********************************************************************/
-// Engine defines
+// Engine definitions
 #define SMF_TEXSQUARE_SIZE 1024.0
 #ifdef DEFERRED_MODE
 	#define GBUFFER_NORMTEX_IDX 0
@@ -11,8 +11,8 @@
 #endif
 
 /***********************************************************************/
-// Custom defines
-###CUSTOM_DEFINES###
+// Custom definitions
+###CUSTOM_DEFINITIONS###
 
 
 /***********************************************************************/
@@ -34,7 +34,6 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 uniform sampler2D diffuseTex;
 uniform sampler2D terrainNormalsTex;
-uniform sampler2D infoTex;
 uniform sampler2D brdfTex;
 uniform samplerCube reflectionTex;
 
@@ -44,16 +43,20 @@ uniform samplerCube reflectionTex;
 // Uniforms
 uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
 uniform vec2 mapTexGen; // 1.0/mapSize
-uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
 
 uniform vec4 lightDir;
 uniform vec3 lightColor = SUN_COLOR;
 
-uniform float infoTexIntensityMul;
+uniform float groundShadowDensity; //useful for NdotL shading as well, so keep it unconditional
 
-#ifdef HAVE_SHADOWS
-	//uniform sampler2DShadow shadowTex;
-	uniform sampler2D shadowTex;
+#if (HAVE_INFOTEX == 1)
+	uniform sampler2D infoTex;
+	uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
+	uniform float infoTexIntensityMul;
+#endif
+
+#if (HAVE_SHADOWS == 1)
+	uniform sampler2DShadow shadowTex;
 	uniform mat4 shadowMat;
 	uniform vec4 shadowParams;
 #endif
@@ -72,7 +75,9 @@ in Data {
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
+#if (HAVE_INFOTEX == 1)
 	vec2 infoTexCoords;
+#endif
 
 	float fogFactor;
 } fromVS;
@@ -297,6 +302,43 @@ struct VectorDotsInfo {
 };
 
 /***********************************************************************/
+// Shadow Mapping Stuff
+#if (HAVE_SHADOWS == 1)
+float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
+	NdotL = clamp(NdotL, 0.0, 1.0);
+	const float cb = 0.00005;
+	float bias = cb * tan(acos(NdotL));
+	bias = clamp(bias, 0.01 * cb, 5.0 * cb);
+
+	float coeff = 0.0;
+
+	#if (SHADOW_SAMPLES == 1)
+		coeff = textureProj( shadowTex, shadowCoords + vec4(0.0, 0.0, bias, 0.0) );
+	#else
+		const int ssHalf = int(floor(float(SHADOW_SAMPLES)/2.0));
+		const float ssSum = float((ssHalf + 1) * (ssHalf + 1));
+
+		shadowCoords += vec4(0.0, 0.0, -bias, 0.0);
+
+		for( int x = -ssHalf; x <= ssHalf; x++ ) {
+			float wx = float(ssHalf - abs(x) + 1) / ssSum;
+			for( int y = -ssHalf; y <= ssHalf; y++ ) {
+				float wy = float(ssHalf - abs(y) + 1) / ssSum;
+				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y));
+			}
+		}
+	#endif
+
+	coeff  = (1.0 - coeff);
+	coeff *= smoothstep(0.1, 1.0, coeff);
+
+	coeff *= groundShadowDensity;
+	return (1.0 - coeff);
+}
+#endif
+
+
+/***********************************************************************/
 // PBR stuff
 
 // Updated and fixed version of
@@ -470,7 +512,9 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 vec2 diffuseTexCoords;
 vec2 normalTexCoords;
 vec2 mapTexCoords;
-vec2 infoTexCoords;
+#if (HAVE_INFOTEX == 1)
+	vec2 infoTexCoords;
+#endif
 
 vec3 terrainWorldNormal;
 
@@ -498,14 +542,16 @@ vec3 GetTerrainNormal(vec2 uv) {
 	return normal;
 }
 
-#line 20459
+#line 20502
 
 void main() {
 
 	diffuseTexCoords = fromVS.diffuseTexCoords;
 	normalTexCoords = fromVS.normalTexCoords;
 	mapTexCoords = fromVS.mapTexCoords;
+#if (HAVE_INFOTEX == 1)
 	infoTexCoords = fromVS.infoTexCoords;
+#endif
 
 	FillMaterialWeights();
 
@@ -543,7 +589,9 @@ void main() {
 		diffuseTexCoords = fromVS.diffuseTexCoords;
 		normalTexCoords = fromVS.normalTexCoords;
 		mapTexCoords = fromVS.mapTexCoords;
-		infoTexCoords = fromVS.infoTexCoords;
+		#if (HAVE_INFOTEX == 1)
+			infoTexCoords = fromVS.infoTexCoords;
+		#endif
 	#endif
 
 	FillMaterialParams();
@@ -567,6 +615,9 @@ void main() {
 		clamp(dot(V, H), 0.0, 1.0)		//vdi.VdotH
 	);
 
+	float shadowMix = 0.0;
+	float shadowN = 0.0;
+
 	for (int i = 0; i < MAT_COUNT; ++i) {
 		// TODO: review (material[i].weight >= WEIGHT_CUTOFF) impact
 		bool enoughWeight = (material[i].weight >= WEIGHT_CUTOFF);
@@ -586,10 +637,34 @@ void main() {
 			vdi.NdotV = clamp(abs(dot(N, V)), 0.001, 1.0);
 			vdi.NdotH = clamp(dot(N, H), 0.0, 1.0);
 
+			shadowMix = max(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
+			shadowN = max(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
+
 			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;
-			//gl_FragColor.rgb += material[i].baseColor * material[i].weight;
 		}
 	}
+
+	float shadowG = 1.0;
+
+	#if (HAVE_SHADOWS == 1)
+		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
+		// TODO: figure out if this can be moved to Vertex Shader
+		vec4 shadowTexCoord = shadowMat * vertexWorldPos;
+		shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);
+		shadowTexCoord.xy += shadowParams.xy;
+
+		// TODO: figure out performance implications of conditional
+		#if 0
+			if (NdotL > 0.0) {
+				shadowG = GetShadowCoeff(shadowTexCoord, NdotL);
+			}
+		#else
+			shadowG = GetShadowCoeff(shadowTexCoord, NdotL);
+		#endif
+	#endif
+
+	float shadow = mix(shadowN, shadowG, shadowMix);
+	gl_FragColor.rgb *= shadow;
 
 	//gl_FragColor.rgb = material[0].baseColor;
 	//gl_FragColor.rgb =  BlendNormals(worldTBN * UnpackNormals(material[0].blendNormal));

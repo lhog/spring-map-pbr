@@ -135,8 +135,7 @@ local pbrSplatDefaults = {
 
 	baseColor = "vec3(0.0)", -- Only in use when workflow == METALNESS. Use fromSRGB() in case textures are in non-linear (sRGB) space.
 
-	blendNormal = "vec3(0.5, 0.5, 1.0)", -- TBN space normals, that will be blended into map normals
-	blendNormalStrength = "vec3(1.0)",
+	blendNormal = "vec3(0.0, 0.0, 1.0)", -- TBN space normals, that will be blended into map normals
 
 	height = "0.0", -- Used for height based blending and POM
 	pomScale = "0.0",
@@ -172,13 +171,13 @@ end
 
 local pbrMapDefaultDefinitions = {
 	["SUN_COLOR"] = LuaToGLSL({gl.GetSun("diffuse")}),
-	["FAST_GAMMA"] = "0",
+	["FAST_GAMMA"] = "0", -- Faster gamma correction makes darker area apear brighter. Doesn't look to good.
 	["WEIGHT_CUTOFF"] = "10.0/255.0",
 	["POM_MAXSTEPS"] = "32",
 	["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THIN",
-	["MAT_BLENDING"] = "MAT_BLENDING_WEIGHT",
+	["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "", -- weights based blending if empty, height based blending with height smoothness factor otherwise
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
-	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code.
+	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
 	["SHADOW_SAMPLES"] = "3", --number of shadow map samples, "1" will revert to standard spring shadows
 	["IBL_DIFFUSECOLOR"] = "",  -- replaces IBL diffuse sampling result with color value defined here
@@ -193,8 +192,7 @@ local pbrMapDefaults = {
 	definitions = {},
 	customCode = "",
 	splats = {},
-	textures = {
-	},
+	textures = {},
 	debug = {},
 }
 
@@ -257,9 +255,8 @@ local specularWFSplatTemplate =
 
 		material[###MAT_NUM###].baseColor = baseColor;
 
-		material[###MAT_NUM###].blendNormal = UnpackNormals(###BLEND_NORMAL###) * ###BLEND_NORMAL_STRENGTH###;
+		material[###MAT_NUM###].blendNormal = ###BLEND_NORMAL###;
 
-		material[###MAT_NUM###].height = ###HEIGHT###;
 		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
 		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
 		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
@@ -273,9 +270,8 @@ local metalnessWFSplatTemplate =
 [[	{
 		material[###MAT_NUM###].baseColor = ###BASE_COLOR###;
 
-		material[###MAT_NUM###].blendNormal = UnpackNormals(###BLEND_NORMAL###) * ###BLEND_NORMAL_STRENGTH###;
+		material[###MAT_NUM###].blendNormal = ###BLEND_NORMAL###;
 
-		material[###MAT_NUM###].height = ###HEIGHT###;
 		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
 		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
 		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
@@ -289,7 +285,7 @@ local metalnessWFSplatTemplate =
 local function ParseSplats(pbrMap)
 	local hasDefaultSplat = false
 	local splatsCode = ""
-	local splatsWeightCode = ""
+	local splatsWeightHeightCode = ""
 
 	local splatNum = 0
 	for splatId, splatDef in pairs(pbrMap.splats) do
@@ -305,7 +301,8 @@ local function ParseSplats(pbrMap)
 			end
 		end
 
-		splatsWeightCode = splatsWeightCode .. string.format("\tmaterial[%d].weight = %s;\n", splatNum, splatDef.weight)
+		splatsWeightHeightCode = splatsWeightHeightCode .. string.format("\tmaterial[%d].weight = %s;\n", splatNum, splatDef.weight)
+		splatsWeightHeightCode = splatsWeightHeightCode .. string.format("\tmaterial[%d].height = %s;\n", splatNum, splatDef.height)
 
 		local splatCode = ""
 
@@ -317,9 +314,7 @@ local function ParseSplats(pbrMap)
 			splatCode = splatCode:gsub("###BASE_COLOR###", splatDef.baseColor)
 
 			splatCode = splatCode:gsub("###BLEND_NORMAL###", splatDef.blendNormal)
-			splatCode = splatCode:gsub("###BLEND_NORMAL_STRENGTH###", splatDef.blendNormalStrength)
 
-			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
 			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
 			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
 			splatCode = splatCode:gsub("###OCCLUSION###", splatDef.occlusion)
@@ -337,9 +332,7 @@ local function ParseSplats(pbrMap)
 			splatCode = splatCode:gsub("###SPECULAR_COLOR###", splatDef.specularColor)
 
 			splatCode = splatCode:gsub("###BLEND_NORMAL###", splatDef.blendNormal)
-			splatCode = splatCode:gsub("###BLEND_NORMAL_STRENGTH###", splatDef.blendNormalStrength)
 
-			splatCode = splatCode:gsub("###HEIGHT###", splatDef.height)
 			splatCode = splatCode:gsub("###POM_SCALE###", splatDef.pomScale)
 			splatCode = splatCode:gsub("###EMISSION_COLOR###", splatDef.emissionColor)
 			splatCode = splatCode:gsub("###OCCLUSION###", splatDef.occlusion)
@@ -354,7 +347,7 @@ local function ParseSplats(pbrMap)
 		splatNum = splatNum + 1
 	end
 
-	return splatsCode, splatsWeightCode, hasDefaultSplat, splatNum
+	return splatsCode, splatsWeightHeightCode, hasDefaultSplat, splatNum
 end
 
 local function ParseEverything()
@@ -404,7 +397,7 @@ local function ParseEverything()
 		samplerUniformsCode = samplerUniformsCode .. string.format("uniform sampler2D tex%d;\n", tun)
 	end
 
-	local splatsCode, splatsWeightCode, hasDefaultSplat, splatCount = ParseSplats(pbrMap)
+	local splatsCode, splatsWeightHeightCode, hasDefaultSplat, splatCount = ParseSplats(pbrMap)
 	pbrMap.definitions["HAS_DEFAULT_SPLAT"] = (hasDefaultSplat and "1") or "0"
 
 	if pbrMap.definitions["IBL_INVERSE_TONEMAP_MUL"] ~= "" then
@@ -417,6 +410,10 @@ local function ParseEverything()
 
 	if pbrMap.definitions["IBL_SPECULARCOLOR"] ~= "" then
 		pbrMap.definitions["IBL_SPECULARCOLOR_STATIC"] = "1"
+	end
+	
+	if pbrMap.definitions["MAT_BLENDING_HEIGHT_SMOOTHNESS"] ~= "" then
+		pbrMap.definitions["MAT_BLENDING_HEIGHT"] = "1"
 	end
 
 	-- Standard spring definitions
@@ -436,7 +433,7 @@ local function ParseEverything()
 		customDefinitions = customDefinitions .. string.format("#define %s %s\n", defKey, defVal)
 	end
 
-	return samplerUniformsCode, splatsCode, splatsWeightCode, customDefinitions, pbrMap.customCode, splatCount, boundTexUnits
+	return samplerUniformsCode, splatsCode, splatsWeightHeightCode, customDefinitions, pbrMap.customCode, splatCount, boundTexUnits
 end
 
 
@@ -457,9 +454,9 @@ local boundTexUnits = nil
 
 function gadget:Initialize()
 
-	local samplerUniformsCode, splatsCode, splatsWeightCode, customDefinitions, customCode, splatCount
+	local samplerUniformsCode, splatsCode, splatsWeightHeightCode, customDefinitions, customCode, splatCount
 
-	samplerUniformsCode, splatsCode, splatsWeightCode,
+	samplerUniformsCode, splatsCode, splatsWeightHeightCode,
 	customDefinitions, customCode, splatCount, boundTexUnits = ParseEverything()
 
 	local boundSamplers = {}
@@ -506,7 +503,7 @@ function gadget:Initialize()
 	fragCode = fragCode:gsub("###SAMPLER_UNIFORMS###", samplerUniformsCode)
 	fragCode = fragCode:gsub("###CUSTOM_CODE###", customCode)
 	fragCode = fragCode:gsub("###MATERIALS_COUNT###", splatCount)
-	fragCode = fragCode:gsub("###MATERIAL_WEIGHTS###", splatsWeightCode)
+	fragCode = fragCode:gsub("###MATERIAL_WEIGHTS_HEIGHTS###", splatsWeightHeightCode)
 	fragCode = fragCode:gsub("###MATERIAL_PARAMS###", splatsCode)
 
 	Spring.Echo("vertCode = \n\n\n\n", vertCode)

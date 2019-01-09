@@ -281,8 +281,8 @@ struct MaterialInfo {
 	vec3 blendNormal;
 
 	float weight;
-
 	float height;
+
 	float pomScale;
 	float occlusion;
 	float specularF0;
@@ -501,7 +501,13 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
 
-	return (sunLitDiffColor + iblLitDiffColor) * mat.occlusion + (sunLitSpecColor + iblLitSpecColor);
+	//TODO: figure out which one looks better
+	float occlusion = mix(1.0, groundShadowDensity, 1.0 - mat.occlusion);
+	#if 0
+		return (sunLitDiffColor + iblLitDiffColor) * occlusion + (sunLitSpecColor + iblLitSpecColor);
+	#else
+		return (sunLitDiffColor + sunLitSpecColor) + (iblLitDiffColor + iblLitSpecColor) * occlusion;
+	#endif
 	//return iblLitSpecColor;
 }
 
@@ -524,10 +530,11 @@ vec2 flipUV(vec2 uv) {
 	return vec2(uv.x, 1.0 - uv.y);
 }
 
-#define UnpackNormals(xyz) (2.0 * xyz - 1.0)
+#define DXUnpackNormals(xyz) ((2.0 * xyz - 1.0) * vec3(1.0, -1.0, 1.0))
+#define OGLUnpackNormals(xyz) (2.0 * xyz - 1.0)
 
-void FillMaterialWeights() {
-	###MATERIAL_WEIGHTS###
+void FillMaterialWeightsHeights() {
+	###MATERIAL_WEIGHTS_HEIGHTS###
 }
 
 void FillMaterialParams() {
@@ -552,24 +559,54 @@ void main() {
 	infoTexCoords = fromVS.infoTexCoords;
 #endif
 
-	FillMaterialWeights();
+	FillMaterialWeightsHeights();
+	{
+		float weightsSum = 0.0;
+		for (int i = 0; i < MAT_COUNT; ++i) {
+			// TODO: review float(material[i].weight >= WEIGHT_CUTOFF) impact
+			//weightsSum += material[i].weight * float(material[i].weight >= WEIGHT_CUTOFF);
+			weightsSum += material[i].weight;
+		}
 
-	float weightsSum = 0.0;
-	for (int i = 0; i < MAT_COUNT; ++i) {
-		// TODO: review float(material[i].weight >= WEIGHT_CUTOFF) impact
-		weightsSum += material[i].weight * float(material[i].weight >= WEIGHT_CUTOFF);
+		#if (HAS_DEFAULT_SPLAT == 1)
+			// default splat goes always in [0]. Only defined if sum(non-default splat weights) < 1.0, otherwise it's 0.0
+			material[0].weight = 1.0 - min(weightsSum, 1.0);
+		#endif
+
+		// Sum of weights might go over 1.0, so normalize splat weights in such case
+		float weightsSumOr1 = max(weightsSum, 1.0);
+		for (int i = 0; i < MAT_COUNT; ++i) {
+			material[i].weight /= weightsSumOr1;
+		}
 	}
+	
+	// https://raw.githubusercontent.com/Zylann/godot_heightmap_plugin/master/addons/zylann.hterrain/shaders/simple4_lite.shader
+	#if (MAT_BLENDING_HEIGHT == 1)
+	{
+		const float dh = MAT_BLENDING_HEIGHT_SMOOTHNESS;
+		const float minusInf = -1.0 / 0.0;
 
-	#if (HAS_DEFAULT_SPLAT == 1)
-		// default splat goes always in [0]. Only defined if sum(non-default splat weights) < 1.0, otherwise it's 0.0
-		material[0].weight = 1.0 - min(weightsSum, 1.0);
+		// use of single hMax is incorrect, but fast and not too detrimental to the final blending result.
+		// see link above how maximums should be calculated
+		float hMax = minusInf;
+
+		for (int i = 0; i < MAT_COUNT; ++i) {
+			material[i].weight += material[i].height; // h = bumps + splat;
+			hMax = max(hMax, material[i].weight);
+			material[i].weight += dh; // vec4 d = h + dh;
+		}
+
+		float weightsSum = 0.0;
+		for (int i = 0; i < MAT_COUNT; ++i) {
+			material[i].weight = clamp(material[i].weight - hMax, 0.0, 1.0);
+			weightsSum += material[i].weight;
+		}
+		
+		for (int i = 0; i < MAT_COUNT; ++i) {
+			material[i].weight /= weightsSum;
+		}
+	}
 	#endif
-
-	// Sum of weights might go over 1.0, so normalize splat weights in such case
-	float weightsSumOr1 = max(weightsSum, 1.0);
-	for (int i = 0; i < MAT_COUNT; ++i) {
-		material[i].weight /= weightsSumOr1;
-	}
 
 	vec4 vertexWorldPos = fromVS.vertexWorldPos;
 
@@ -582,8 +619,8 @@ void main() {
 	mat3 invWorldTBN = transpose(worldTBN); //from world space to tangent space
 
 	#if (POM_MAXSTEPS > 0)
-		// TODO: height blending for POM
 		// TODO POM
+		
 		//these 4 below will be affected by POM (see above)
 		diffuseTexCoords = fromVS.diffuseTexCoords;
 		normalTexCoords = fromVS.normalTexCoords;
@@ -617,11 +654,13 @@ void main() {
 	float shadowMix = 1.0;
 	float shadowN = 1.0;
 
+	vec3 emissionColor = vec3(0.0);
+
 	for (int i = 0; i < MAT_COUNT; ++i) {
 		// TODO: review (material[i].weight >= WEIGHT_CUTOFF) impact
-		bool enoughWeight = (material[i].weight >= WEIGHT_CUTOFF);
+		// bool enoughWeight = (material[i].weight >= WEIGHT_CUTOFF);
 		// TODO: do branchless?
-		if (enoughWeight) {
+		if (material[i].weight > 0.0) {
 			vec3 blendNormalTBN = material[i].blendNormal;
 			vec3 N = worldTBN * blendNormalTBN; //blended already because of TBN transformation?
 			//vec3 N = terrainWorldNormal;
@@ -639,7 +678,8 @@ void main() {
 			shadowMix = min(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
 			shadowN = min(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
 
-			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;
+			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
+			emissionColor += material[i].emissionColor * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
 		}
 	}
 
@@ -664,6 +704,8 @@ void main() {
 
 	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;
+
+	gl_FragColor.rgb += emissionColor;
 
 	//gl_FragColor.rgb = material[0].baseColor;
 	//gl_FragColor.rgb =  BlendNormals(worldTBN * UnpackNormals(material[0].blendNormal));

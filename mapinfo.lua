@@ -270,9 +270,9 @@ local mapinfo = {
 			},
 			definitions = {
 				["SUN_COLOR"] = "vec3(1.0)",
-				["SHADOW_SAMPLES"] = "3",
-				--["WEIGHT_CUTOFF"] = "0.0",
-				["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "0.25",
+				["SHADOW_SAMPLES"] = "1",
+				--["WEIGHT_CUTOFF"] = "0.3",
+				["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "0.2",
 				--["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				--["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				--["IBL_DIFFUSECOLOR"] = "vec3(1.0)",
@@ -291,7 +291,7 @@ local mapinfo = {
 					diffuseColor = "fromSRGB(texture(tex2, 15.0 * mapTexCoords).rgb)",
 					specularColor = "fromSRGB(texture(tex3, 15.0 * mapTexCoords).rgb)",
 					occlusion = "texture(tex5, 15.0 * mapTexCoords).r",
-					blendNormal = "OGLUnpackNormals(texture(tex4, 15.0 * mapTexCoords).xyz)",
+					--blendNormal = "OGLUnpackNormals(texture(tex4, 15.0 * mapTexCoords).xyz)",
 					--blendNormalStrength = "vec3(0.0)",
 					roughness = "0.0",
 					

@@ -534,11 +534,11 @@ vec2 flipUV(vec2 uv) {
 #define OGLUnpackNormals(xyz) (2.0 * xyz - 1.0)
 
 void FillMaterialWeightsHeights() {
-	###MATERIAL_WEIGHTS_HEIGHTS###
+###MATERIAL_WEIGHTS_HEIGHTS###
 }
 
 void FillMaterialParams() {
-	###MATERIAL_PARAMS###
+###MATERIAL_PARAMS###
 }
 
 vec3 GetTerrainNormal(vec2 uv) {
@@ -579,7 +579,7 @@ void main() {
 			material[i].weight /= weightsSumOr1;
 		}
 	}
-	
+
 	// https://raw.githubusercontent.com/Zylann/godot_heightmap_plugin/master/addons/zylann.hterrain/shaders/simple4_lite.shader
 	#if (MAT_BLENDING_HEIGHT == 1)
 	{
@@ -601,12 +601,15 @@ void main() {
 			material[i].weight = clamp(material[i].weight - hMax, 0.0, 1.0);
 			weightsSum += material[i].weight;
 		}
-		
+
 		for (int i = 0; i < MAT_COUNT; ++i) {
 			material[i].weight /= weightsSum;
 		}
 	}
 	#endif
+
+	//gl_FragColor.rg = vec2(material[0].weight, material[1].weight);
+	//return;
 
 	vec4 vertexWorldPos = fromVS.vertexWorldPos;
 
@@ -620,7 +623,7 @@ void main() {
 
 	#if (POM_MAXSTEPS > 0)
 		// TODO POM
-		
+
 		//these 4 below will be affected by POM (see above)
 		diffuseTexCoords = fromVS.diffuseTexCoords;
 		normalTexCoords = fromVS.normalTexCoords;
@@ -651,8 +654,8 @@ void main() {
 		clamp(dot(V, H), 0.0, 1.0)		//vdi.VdotH
 	);
 
-	float shadowMix = 1.0;
-	float shadowN = 1.0;
+	float shadowMix = 0.0;
+	float shadowN = 0.0;
 
 	vec3 emissionColor = vec3(0.0);
 
@@ -675,8 +678,8 @@ void main() {
 			vdi.NdotV = clamp(abs(dot(N, V)), 0.001, 1.0);
 			vdi.NdotH = clamp(dot(N, H), 0.0, 1.0);
 
-			shadowMix = min(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
-			shadowN = min(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
+			shadowMix = max(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
+			shadowN = max(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
 
 			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
 			emissionColor += material[i].emissionColor * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
@@ -701,6 +704,10 @@ void main() {
 			shadowG = GetShadowCoeff(shadowTexCoord, NdotL);
 		#endif
 	#endif
+
+	//gl_FragColor.rg = vec2(1.0 - shadowN, 1.0 - shadowG);
+	//gl_FragColor.b = 0.0;
+	//return;
 
 	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;

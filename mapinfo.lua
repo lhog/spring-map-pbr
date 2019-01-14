@@ -297,6 +297,7 @@ local mapinfo = {
 					--blendNormalStrength = "vec3(0.0)",
 					roughness = "0.0",
 
+
 					--height = "texture(tex10, 15.0 * mapTexCoords).r",
 					height = "0.5",
 				},
@@ -313,7 +314,7 @@ local mapinfo = {
 					occlusion = "texture(tex9, 2.0 * mapTexCoords).r",
 					metalness = "0.0",
 
-					--specularF0 = "0.0001",
+					specularF0 = "0.0",
 
 					height = "texture(tex11, 2.0 * mapTexCoords).r",
 				},

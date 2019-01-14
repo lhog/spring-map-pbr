@@ -141,7 +141,7 @@ local pbrSplatDefaults = {
 	pomScale = "0.0",
 	emissionColor = "vec3(0.0)", -- Use fromSRGB() in case textures are in non-linear (sRGB) space.
 	occlusion = "1.0", -- 1.0 is unoccluded.
-	specularF0 = "0.04", -- More often than not you won't be using this.
+	specularF0 = "0.04", -- More often than not you won't be using this. Decrease to 0.0 (clamped to MIN_SPECULAR_F0) to get rid of reflections at grazing angles for non-metallic materials.
 	roughness = "0.0", -- To convert from glossiness use 1.0 - <glossiness>
 
 	metalness = "0.0", -- Only in use when workflow == METALNESS.
@@ -177,10 +177,13 @@ local pbrMapDefaultDefinitions = {
 	["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THICK", -- PBR_SCHLICK_SMITH_GGX_THICK seems to give less glossiness on non-metallic surfaces
 	["PBR_BRDF_DIFFUSE"] = "PBR_DIFFUSE_LAMBERT",  -- Others give almost same picture, but are more expensive
 	["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "", -- weights based blending if empty, height based blending with height smoothness factor otherwise
+	["PBR_F_SCHLICK"] = "PBR_F_SCHLICK_KHRONOS",
+	["PBR_R90_METHOD"] = "PBR_R90_METHOD_GOOGLE",
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
 	["SHADOW_SAMPLES"] = "3", --number of shadow map samples, "1" will revert to standard spring shadows
+	["IBL_SPECULAR_LOD_BIAS"] = "2.5", --positive number will make all cubemap reflections blurry by this LOD value.
 	["IBL_DIFFUSECOLOR"] = "",  -- replaces IBL diffuse sampling result with color value defined here
 	["IBL_SPECULARCOLOR"] = "", -- replaces IBL specular sampling result with color value defined here
 	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
@@ -245,7 +248,7 @@ local specularWFSplatTemplate =
 		vec3 specularColor = ###SPECULAR_COLOR###;
 		float maxSpecular = max(max(specularColor.r, specularColor.g), specularColor.b);
 
-		float specularF0 = clamp(###SPECULAR_F0###, epsilon, 1.0);
+		float specularF0 = clamp(###SPECULAR_F0###, MIN_SPECULAR_F0, 1.0);
 		float metalness = ConvertToMetalness(diffuseColor, specularColor, maxSpecular, specularF0);
 
 		vec3 baseColorDiffusePart = diffuseColor * ((1.0 - maxSpecular) / (1 - specularF0) / max(1.0 - metalness, epsilon));
@@ -269,8 +272,6 @@ local specularWFSplatTemplate =
 
 local metalnessWFSplatTemplate =
 [[	{
-		const float epsilon = 1e-6;
-
 		material[###MAT_NUM###].baseColor = ###BASE_COLOR###;
 
 		material[###MAT_NUM###].blendNormal = ###BLEND_NORMAL###;
@@ -278,7 +279,7 @@ local metalnessWFSplatTemplate =
 		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
 		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
 		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
-		material[###MAT_NUM###].specularF0 = clamp(###SPECULAR_F0###, epsilon, 1.0);
+		material[###MAT_NUM###].specularF0 = clamp(###SPECULAR_F0###, MIN_SPECULAR_F0, 1.0);
 		material[###MAT_NUM###].roughness = ###ROUGHNESS###;
 
 		material[###MAT_NUM###].metalness = ###METALNESS###;

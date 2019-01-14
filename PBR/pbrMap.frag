@@ -25,6 +25,7 @@ const float M_PI = 3.14159265358979323846264338327950288419716939937510582097494
 const float M_PI2 = M_PI * 2.0;
 
 const float MIN_ROUGHNESS = 0.04;
+const float MIN_SPECULAR_F0 = 0.0001;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
@@ -272,6 +273,27 @@ vec3 expExpand(in vec3 x, in float cutoff, in float mul) {
 	return x * yL / xL;
 }
 
+/***********************************************************************/
+// Dithering functions
+
+//note: returns [-intensity;intensity[, magnitude of 2x intensity
+//note: from "NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE"
+//      http://advances.realtimerendering.com/s2014/index.html
+float InterleavedGradientNoise(vec2 uv) {
+    const vec3 magic = vec3( 0.06711056, 0.00583715, 52.9829189 );
+    return fract( magic.z * fract( dot( uv, magic.xy ) ) );
+}
+
+vec3 Dither(vec3 input) {
+	//vec2 seed = gl_FragCoord.xy;
+	vec2 seed = gl_FragCoord.xy * 200.0;
+	float rnd = InterleavedGradientNoise(seed);
+	#if 1
+		return input + vec3(rnd, 1.0-rnd, rnd)/255.0;
+	#else
+		return input + vec3(rnd/255.0);
+	#endif
+}
 
 /***********************************************************************/
 // Material and vectors struct
@@ -363,8 +385,8 @@ float ConvertToMetalness(vec3 diffuse, vec3 specular, float maxSpecular, float s
 //
 
 // Normal (Microfacet) Distribution function --------------------------------------
-float D_GGX(float NdotH, float roughness4)
-{
+// Standard across every implementation so far
+float D_GGX(float NdotH, float roughness4) {
 	float denom = NdotH * NdotH * (roughness4 - 1.0) + 1.0;
 	return roughness4/(M_PI * denom*denom);
 }
@@ -375,8 +397,7 @@ float D_GGX(float NdotH, float roughness4)
 // Geometric Shadowing (Occlusion) function --------------------------------------
 #if (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THIN)
 	// Thinner, more concentrated lobe. Equation 4 of https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
-	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness2)
-	{
+	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness2) {
 		float r = roughness + 1.0;
 		float k = roughness2 / 8.0;
 		float GL = NdotL / (NdotL * (1.0 - k) + k);
@@ -385,8 +406,7 @@ float D_GGX(float NdotH, float roughness4)
 	}
 #elif (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THICK)
 	// Wider, more spread lobe. Used in Khronos reference PBR implementation
-	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness4)
-	{
+	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness4) {
 		float GL = 2.0 * NdotL / (NdotL + sqrt(roughness4 + (1.0 - roughness4) * (NdotL * NdotL)));
 		float GV = 2.0 * NdotV / (NdotV + sqrt(roughness4 + (1.0 - roughness4) * (NdotV * NdotV)));
 		return GL * GV;
@@ -395,18 +415,15 @@ float D_GGX(float NdotH, float roughness4)
 
 // Fresnel function ----------------------------------------------------
 // Represent specular reflectivity
-vec3 F_Schlick(float VdotX, vec3 R0, vec3 R90)
-{
+vec3 F_Schlick(float VdotX, vec3 R0, vec3 R90) {
 	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
 }
 
-vec3 F_Schlick(float VdotX, float R0, vec3 R90)
-{
+vec3 F_Schlick(float VdotX, float R0, vec3 R90) {
 	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
 }
 
-float F_Schlick(float VdotX, float R0, float R90)
-{
+float F_Schlick(float VdotX, float R0, float R90) {
 	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
 }
 
@@ -454,6 +471,13 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 	}
 #endif
 
+#define PBR_F_SCHLICK_KHRONOS 1
+#define PBR_F_SCHLICK_SASCHA 2
+#define PBR_F_SCHLICK_GOOGLE 3
+
+#define PBR_R90_METHOD_STD 1
+#define PBR_R90_METHOD_GOOGLE 2
+
 vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 
 	// sanitize inputs
@@ -469,8 +493,13 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 baseDiffuseColor = mat.baseColor * (vec3(1.0) - F0) * (1.0 - metalness);
 	vec3 baseSpecularColor = mix(F0, mat.baseColor, vec3(metalness));
 
-	float maxReflectance = max(max(baseSpecularColor.r, baseSpecularColor.g), baseSpecularColor.b);
-	float reflectance90 = clamp(maxReflectance / mat.specularF0, 0.0, 1.0);
+	#if (PBR_R90_METHOD == PBR_R90_METHOD_STD)
+		float maxReflectance = max(max(baseSpecularColor.r, baseSpecularColor.g), baseSpecularColor.b);
+		float reflectance90 = clamp(maxReflectance / mat.specularF0, 0.0, 1.0);
+		//float reflectance90 = clamp(maxReflectance * 25.0, 0.0, 1.0);
+	#elif (PBR_R90_METHOD == PBR_R90_METHOD_GOOGLE)
+		float reflectance90 = clamp(dot(F0, vec3(50.0 * 0.33)), 0.0, 1.0);
+	#endif
 
 	vec3 specularEnvironmentR0 = baseSpecularColor;
 	vec3 specularEnvironmentR90 = vec3(reflectance90);
@@ -479,11 +508,15 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	float D = D_GGX(vd.NdotH, roughness4);
 
 	// F = Fresnel factor (Reflectance depending on angle of incidence)
-	#if 1 // Khronos & learnopengl
+	#if (PBR_F_SCHLICK == PBR_F_SCHLICK_KHRONOS) // Khronos & learnopengl
 		vec3 F = F_Schlick(vd.VdotH, specularEnvironmentR0, specularEnvironmentR90);
-	#else // SaschaWillems. Likely mistake
+	#elif (PBR_F_SCHLICK == PBR_F_SCHLICK_SASCHA) // SaschaWillems. Likely mistake
 		vec3 F = F_Schlick(vd.NdotV, specularEnvironmentR0, specularEnvironmentR90);
+	#elif (PBR_F_SCHLICK == PBR_F_SCHLICK_GOOGLE) // Google, same as Khronos?
+		vec3 F = F_Schlick(vd.LdotH, specularEnvironmentR0, specularEnvironmentR90);
 	#endif
+
+	//F= vec3(0.001);
 
 	// G = Geometric shadowing term (Microfacets shadowing)
 	#if (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THIN)
@@ -504,6 +537,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	ivec2 reflectionTexSize = textureSize(reflectionTex, 0);
 	float reflectionTexMaxLOD = log2(float(max(reflectionTexSize.x, reflectionTexSize.y)));
 	float specularLOD = reflectionTexMaxLOD * roughness;
+	specularLOD += IBL_SPECULAR_LOD_BIAS;
 
 	#if (IBL_DIFFUSECOLOR_STATIC == 1)
 		vec3 iblDiffuseLight = IBL_DIFFUSECOLOR;

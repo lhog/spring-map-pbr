@@ -439,7 +439,7 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 			float FD90_minus_1 = 2.0 * vd.LdotH * vd.LdotH * roughness - 0.5;
 			float FdV = 1.0 + FD90_minus_1 * pow(vd.NdotV, 5.0);
 			float FdL = 1.0 + FD90_minus_1 * pow(vd.NdotL, 5.0);
-			return (diffColor / M_PI) * FdV * FdL * vd.NdotL;
+			return (diffColor / M_PI) * FdV * FdL;
 	}
 #elif (PBR_BRDF_DIFFUSE == PBR_DIFFUSE_OREN_NAYAR_GODOT)
 	vec3 Diffuse(vec3 diffColor, float roughness, VectorDotsInfo vd) {
@@ -450,7 +450,7 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 			vec3 A = 1.0 + sigma2 * (-0.5 / (sigma2 + 0.33) + 0.17 * diffColor / (sigma2 + 0.13));
 			float B = 0.45 * sigma2 / (sigma2 + 0.09);
 
-			return diffColor * vd.NdotL * (A + vec3(B) * s / t) / M_PI;
+			return diffColor * (A + vec3(B) * s / t) / M_PI;
 	}
 #endif
 

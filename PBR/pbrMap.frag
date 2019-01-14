@@ -87,7 +87,7 @@ in Data {
 
 ###CUSTOM_CODE###
 
-#line 10083
+#line 10090
 
 /***********************************************************************/
 // Gamma forward and inverse correction procedures
@@ -267,7 +267,8 @@ vec3 expExpand(in vec3 x, in float cutoff, in float mul) {
 
 	float cutEval = step(cutoff, xL);
 
-	float yL = (1.0 - cutEval) * xL + cutEval * (exp(mul * xL) - exp(mul * cutoff) + cutoff);
+	//float yL = (1.0 - cutEval) * xL + cutEval * (exp(mul * xL) - exp(mul * cutoff) + cutoff);
+	float yL = mix(xL, exp(mul * xL) - exp(mul * cutoff) + cutoff, cutEval);
 	return x * yL / xL;
 }
 
@@ -373,7 +374,7 @@ float D_GGX(float NdotH, float roughness4)
 
 // Geometric Shadowing (Occlusion) function --------------------------------------
 #if (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THIN)
-	// Thinner, equation 4 of https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+	// Thinner, more concentrated lobe. Equation 4 of https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
 	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness2)
 	{
 		float r = roughness + 1.0;
@@ -383,7 +384,7 @@ float D_GGX(float NdotH, float roughness4)
 		return GL * GV;
 	}
 #elif (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THICK)
-	// Wider, Used in Khronos reference PBR implementation
+	// Wider, more spread lobe. Used in Khronos reference PBR implementation
 	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness4)
 	{
 		float GL = 2.0 * NdotL / (NdotL + sqrt(roughness4 + (1.0 - roughness4) * (NdotL * NdotL)));
@@ -399,6 +400,16 @@ vec3 F_Schlick(float VdotX, vec3 R0, vec3 R90)
 	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
 }
 
+vec3 F_Schlick(float VdotX, float R0, vec3 R90)
+{
+	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
+}
+
+float F_Schlick(float VdotX, float R0, float R90)
+{
+	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
+}
+
 /*
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 {
@@ -406,11 +417,42 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 }
 */
 
-// Directional light Diffuse (Lambert) --------------------------------
-vec3 Diffuse(vec3 color) {
-	return color / M_PI;
-}
+#define PBR_DIFFUSE_LAMBERT 1
+#define PBR_DIFFUSE_BURLEY_GOOGLE 2
+#define PBR_DIFFUSE_BURLEY_GODOT 3
+#define PBR_DIFFUSE_OREN_NAYAR_GODOT 4
 
+// Directional light Diffuse
+#if (PBR_BRDF_DIFFUSE == PBR_DIFFUSE_LAMBERT)
+	vec3 Diffuse(vec3 diffColor, float roughness, VectorDotsInfo vd) {
+		return diffColor / M_PI;
+	}
+#elif (PBR_BRDF_DIFFUSE == PBR_DIFFUSE_BURLEY_GOOGLE)
+	vec3 Diffuse(vec3 diffColor, float roughness, VectorDotsInfo vd) {
+		float f90 = 0.5 + 2.0 * roughness * vd.LdotH * vd.LdotH;
+		float lightScatter = F_Schlick(vd.NdotL, 1.0, f90);
+		float viewScatter  = F_Schlick(vd.NdotV, 1.0, f90);
+		return diffColor * lightScatter * viewScatter / M_PI;
+	}
+#elif (PBR_BRDF_DIFFUSE == PBR_DIFFUSE_BURLEY_GODOT)
+	vec3 Diffuse(vec3 diffColor, float roughness, VectorDotsInfo vd) {
+			float FD90_minus_1 = 2.0 * vd.LdotH * vd.LdotH * roughness - 0.5;
+			float FdV = 1.0 + FD90_minus_1 * pow(vd.NdotV, 5.0);
+			float FdL = 1.0 + FD90_minus_1 * pow(vd.NdotL, 5.0);
+			return (diffColor / M_PI) * FdV * FdL * vd.NdotL;
+	}
+#elif (PBR_BRDF_DIFFUSE == PBR_DIFFUSE_OREN_NAYAR_GODOT)
+	vec3 Diffuse(vec3 diffColor, float roughness, VectorDotsInfo vd) {
+			float s = vd.LdotV - vd.NdotL * vd.NdotV;
+			float t = mix(1.0, max(vd.NdotL, vd.NdotV), step(0.0, s));
+
+			float sigma2 = roughness * roughness; // TODO: this needs checking
+			vec3 A = 1.0 + sigma2 * (-0.5 / (sigma2 + 0.33) + 0.17 * diffColor / (sigma2 + 0.13));
+			float B = 0.45 * sigma2 / (sigma2 + 0.09);
+
+			return diffColor * vd.NdotL * (A + vec3(B) * s / t) / M_PI;
+	}
+#endif
 
 vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 
@@ -451,7 +493,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	#endif
 
 	// Calculation of analytical lighting contribution
-	vec3 sunDiffuseContrib = (1.0 - F) * Diffuse(baseDiffuseColor);
+	vec3 sunDiffuseContrib = (1.0 - F) * Diffuse(baseDiffuseColor, roughness, vd);
 	vec3 sunSpecContrib = F * G * D / (4.0 * vd.NdotL * vd.NdotV);
 
 	// Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)

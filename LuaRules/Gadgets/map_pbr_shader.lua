@@ -174,7 +174,8 @@ local pbrMapDefaultDefinitions = {
 	["FAST_GAMMA"] = "0", -- Faster gamma correction makes darker area apear brighter. Doesn't look to good.
 	["WEIGHT_CUTOFF"] = "10.0/255.0",
 	["POM_MAXSTEPS"] = "32",
-	["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THIN",
+	["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THICK", -- PBR_SCHLICK_SMITH_GGX_THICK seems to give less glossiness on non-metallic surfaces
+	["PBR_BRDF_DIFFUSE"] = "PBR_DIFFUSE_LAMBERT",  -- Burley (google) is almost same, but more expensive. Godot's are likely bugged
 	["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "", -- weights based blending if empty, height based blending with height smoothness factor otherwise
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code
@@ -244,7 +245,7 @@ local specularWFSplatTemplate =
 		vec3 specularColor = ###SPECULAR_COLOR###;
 		float maxSpecular = max(max(specularColor.r, specularColor.g), specularColor.b);
 
-		float specularF0 = ###SPECULAR_F0###;
+		float specularF0 = clamp(###SPECULAR_F0###, epsilon, 1.0);
 		float metalness = ConvertToMetalness(diffuseColor, specularColor, maxSpecular, specularF0);
 
 		vec3 baseColorDiffusePart = diffuseColor * ((1.0 - maxSpecular) / (1 - specularF0) / max(1.0 - metalness, epsilon));
@@ -260,7 +261,7 @@ local specularWFSplatTemplate =
 		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
 		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
 		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
-		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###;
+		material[###MAT_NUM###].specularF0 = specularF0;
 		material[###MAT_NUM###].roughness = ###ROUGHNESS###;
 
 		material[###MAT_NUM###].metalness = metalness;
@@ -268,6 +269,8 @@ local specularWFSplatTemplate =
 
 local metalnessWFSplatTemplate =
 [[	{
+		const float epsilon = 1e-6;
+
 		material[###MAT_NUM###].baseColor = ###BASE_COLOR###;
 
 		material[###MAT_NUM###].blendNormal = ###BLEND_NORMAL###;
@@ -275,7 +278,7 @@ local metalnessWFSplatTemplate =
 		material[###MAT_NUM###].pomScale = ###POM_SCALE###;
 		material[###MAT_NUM###].emissionColor = ###EMISSION_COLOR###;
 		material[###MAT_NUM###].occlusion = ###OCCLUSION###;
-		material[###MAT_NUM###].specularF0 = ###SPECULAR_F0###;
+		material[###MAT_NUM###].specularF0 = clamp(###SPECULAR_F0###, epsilon, 1.0);
 		material[###MAT_NUM###].roughness = ###ROUGHNESS###;
 
 		material[###MAT_NUM###].metalness = ###METALNESS###;

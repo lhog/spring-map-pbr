@@ -256,12 +256,12 @@ local mapinfo = {
 				[3] = "Ice_001/Ice_001_SPEC.jpg",
 				[4] = "Ice_001/Ice_001_NRM.jpg",
 				[5] = "Ice_001/Ice_001_OCC.jpg",
-				
+
 				[6] = "Rocks_006_2K/Rocks06_col.jpg",
 				[7] = "Rocks_006_2K/Rocks06_nrm.jpg",
 				[8] = "Rocks_006_2K/Rocks06_rgh.jpg",
 				[9] = "Rocks_006_2K/Rocks06_AO.jpg",
-				
+
 				[10] = "Ice_001/Ice_001_DISP.png",
 				[11] = "Rocks_006_2K/Rocks06_disp.jpg",
 
@@ -273,11 +273,13 @@ local mapinfo = {
 				["SHADOW_SAMPLES"] = "1",
 				--["WEIGHT_CUTOFF"] = "0.3",
 				["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "0.2",
+				["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THICK",
+				["PBR_BRDF_DIFFUSE"] = "PBR_DIFFUSE_LAMBERT",
 				--["IBL_DIFFUSECOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				--["IBL_SPECULARCOLOR"] = "vec3(0.6, 0.77, 0.77)",
 				--["IBL_DIFFUSECOLOR"] = "vec3(1.0)",
 				--["IBL_SPECULARCOLOR"] = "vec3(1.0)",
-				
+
 				--["OUTPUT_EXPOSURE(preExpColor)"] = "1.4 * preExpColor",
 				--["OUTPUT_TONEMAPPING(preTMColor)"] = "SteveMTM2(preTMColor)"
 			},
@@ -294,11 +296,11 @@ local mapinfo = {
 					--blendNormal = "OGLUnpackNormals(texture(tex4, 15.0 * mapTexCoords).xyz)",
 					--blendNormalStrength = "vec3(0.0)",
 					roughness = "0.0",
-					
+
 					--height = "texture(tex10, 15.0 * mapTexCoords).r",
 					height = "0.5",
 				},
-		
+
 				{
 					workflow = "METALNESS",
 					--weight = "texture(tex20, (mapTexCoords)).r",
@@ -307,10 +309,12 @@ local mapinfo = {
 					baseColor = "texture(tex6, 2.0 * mapTexCoords).rgb",
 					blendNormal = "DXUnpackNormals(texture(tex7, 2.0 * mapTexCoords).xyz)",
 					roughness = "texture(tex8, 2.0 * mapTexCoords).r",
-					
+
 					occlusion = "texture(tex9, 2.0 * mapTexCoords).r",
 					metalness = "0.0",
-					
+
+					--specularF0 = "0.0001",
+
 					height = "texture(tex11, 2.0 * mapTexCoords).r",
 				},
 				--{ },

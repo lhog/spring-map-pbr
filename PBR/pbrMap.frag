@@ -88,7 +88,7 @@ in Data {
 
 ###CUSTOM_CODE###
 
-#line 10090
+#line 10091
 
 /***********************************************************************/
 // Gamma forward and inverse correction procedures
@@ -427,6 +427,21 @@ float F_Schlick(float VdotX, float R0, float R90) {
 	return R0 + (R90 - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
 }
 
+vec3 F_Schlick(float VdotX, vec3 R0) {
+	return R0 + (vec3(1.0) - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
+}
+
+vec3 F_Schlick(float VdotX, float R0) {
+	return R0 + (vec3(1.0) - R0) * pow( clamp(1.0 - VdotX, 0.0, 1.0), 5.0 );
+}
+
+vec3 F_Schlick_Gaussian(float VdotX, vec3 R0, vec3 R90) {
+	//Spherical Gaussian Approximation, Used in UE4(?)
+	//Reference: Seb. Lagarde's Blog (seblagarde.wordpress.com)
+	vec3 k = vec3(exp2((-5.55473 * VdotX - 6.98316) * VdotX));
+	return R0 + (R90 - R0) * k;
+}
+
 /*
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 {
@@ -474,6 +489,7 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 #define PBR_F_SCHLICK_KHRONOS 1
 #define PBR_F_SCHLICK_SASCHA 2
 #define PBR_F_SCHLICK_GOOGLE 3
+#define PBR_F_SCHLICK_GAUSSIAN 4
 
 #define PBR_R90_METHOD_STD 1
 #define PBR_R90_METHOD_GOOGLE 2
@@ -514,6 +530,8 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 		vec3 F = F_Schlick(vd.NdotV, specularEnvironmentR0, specularEnvironmentR90);
 	#elif (PBR_F_SCHLICK == PBR_F_SCHLICK_GOOGLE) // Google, same as Khronos?
 		vec3 F = F_Schlick(vd.LdotH, specularEnvironmentR0, specularEnvironmentR90);
+	#elif (PBR_F_SCHLICK == PBR_F_SCHLICK_GAUSSIAN)
+		vec3 F = F_Schlick_Gaussian(vd.LdotH, specularEnvironmentR0, specularEnvironmentR90);
 	#endif
 
 	//F= vec3(0.001);
@@ -624,7 +642,7 @@ vec3 GetTerrainNormal(vec2 uv) {
 	return normal;
 }
 
-#line 20544
+#line 20650
 
 void main() {
 

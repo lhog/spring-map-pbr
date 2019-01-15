@@ -397,16 +397,17 @@ float D_GGX(float NdotH, float roughness4) {
 // Geometric Shadowing (Occlusion) function --------------------------------------
 #if (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THIN)
 	// Thinner, more concentrated lobe. Equation 4 of https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
-	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness2) {
-		float r = roughness + 1.0;
-		float k = roughness2 / 8.0;
+	// Same is used to generate BRDF LUT
+	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness4) {
+		float k = roughness + 1.0;
+		k = k * k / 8.0;
 		float GL = NdotL / (NdotL * (1.0 - k) + k);
 		float GV = NdotV / (NdotV * (1.0 - k) + k);
 		return GL * GV;
 	}
 #elif (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THICK)
 	// Wider, more spread lobe. Used in Khronos reference PBR implementation
-	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness4) {
+	float G_SchlickSmithGGX(float NdotL, float NdotV, float roughness, float roughness4) {
 		float GL = 2.0 * NdotL / (NdotL + sqrt(roughness4 + (1.0 - roughness4) * (NdotL * NdotL)));
 		float GV = 2.0 * NdotV / (NdotV + sqrt(roughness4 + (1.0 - roughness4) * (NdotV * NdotV)));
 		return GL * GV;
@@ -552,11 +553,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	//F= vec3(0.001);
 
 	// G = Geometric shadowing term (Microfacets shadowing)
-	#if (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THIN)
-		float G = G_SchlickSmithGGX(vd.NdotL, vd.NdotV, roughness, roughness2);
-	#elif (PBR_SCHLICK_SMITH_GGX == PBR_SCHLICK_SMITH_GGX_THICK)
-		float G = G_SchlickSmithGGX(vd.NdotL, vd.NdotV, roughness4);
-	#endif
+	float G = G_SchlickSmithGGX(vd.NdotL, vd.NdotV, roughness, roughness4);
 
 	// Calculation of analytical lighting contribution
 	vec3 sunDiffuseContrib = (1.0 - F) * Diffuse(baseDiffuseColor, roughness, vd);

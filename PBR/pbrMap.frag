@@ -442,6 +442,18 @@ vec3 F_Schlick_Gaussian(float VdotX, vec3 R0, vec3 R90) {
 	return R0 + (R90 - R0) * k;
 }
 
+// https://github.com/AndreaMelle/unitypbr/blob/master/Assets/pbr.cginc
+vec3 F_CookTorrance(float VdotX, vec3 R0) {
+	vec3 sqrtR0 = sqrt(R0);
+    vec3 n = (1.0 + sqrtR0) / (1.0 - sqrtR0);
+    vec3 g = sqrt(n * n + VdotX * VdotX - 1.0);
+
+    vec3 part1 = (g - VdotX)/(g + VdotX);
+    vec3 part2 = ((g + VdotX) * VdotX - 1.0f)/((g - VdotX) * VdotX + 1.0f);
+
+    return max( vec3(0.0), 0.5 * part1 * part1 * (1.0 + part2 * part2) );
+}
+
 /*
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 {
@@ -490,6 +502,7 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 #define PBR_F_SCHLICK_SASCHA 2
 #define PBR_F_SCHLICK_GOOGLE 3
 #define PBR_F_SCHLICK_GAUSSIAN 4
+#define PBR_F_COOK_TORRANCE 5
 
 #define PBR_R90_METHOD_STD 1
 #define PBR_R90_METHOD_GOOGLE 2
@@ -511,7 +524,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 
 	#if (PBR_R90_METHOD == PBR_R90_METHOD_STD)
 		float maxReflectance = max(max(baseSpecularColor.r, baseSpecularColor.g), baseSpecularColor.b);
-		float reflectance90 = clamp(maxReflectance / mat.specularF0, 0.0, 1.0);
+		float reflectance90 = clamp(maxReflectance / mat.specularF0, 0.0, 1.0); // bugged way...
 		//float reflectance90 = clamp(maxReflectance * 25.0, 0.0, 1.0);
 	#elif (PBR_R90_METHOD == PBR_R90_METHOD_GOOGLE)
 		float reflectance90 = clamp(dot(F0, vec3(50.0 * 0.33)), 0.0, 1.0);
@@ -532,6 +545,8 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 		vec3 F = F_Schlick(vd.LdotH, specularEnvironmentR0, specularEnvironmentR90);
 	#elif (PBR_F_SCHLICK == PBR_F_SCHLICK_GAUSSIAN)
 		vec3 F = F_Schlick_Gaussian(vd.LdotH, specularEnvironmentR0, specularEnvironmentR90);
+	#elif (PBR_F_SCHLICK == PBR_F_COOK_TORRANCE)
+		vec3 F = F_CookTorrance(vd.LdotH, specularEnvironmentR0);
 	#endif
 
 	//F= vec3(0.001);

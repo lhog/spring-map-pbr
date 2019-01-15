@@ -314,7 +314,7 @@ local mapinfo = {
 					occlusion = "texture(tex9, 2.0 * mapTexCoords).r",
 					metalness = "0.0",
 
-					specularF0 = "0.0",
+					specularF0 = "0.004",
 
 					height = "texture(tex11, 2.0 * mapTexCoords).r",
 				},

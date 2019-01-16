@@ -50,6 +50,8 @@ uniform vec3 lightColor = SUN_COLOR;
 
 uniform float groundShadowDensity; //useful for NdotL shading as well, so keep it unconditional
 
+uniform float gameFrame;
+
 #if (HAVE_INFOTEX == 1)
 	uniform sampler2D infoTex;
 	uniform vec2 infoTexGen;     // 1.0/(pwr2map{x,z} * SQUARE_SIZE)
@@ -276,23 +278,64 @@ vec3 expExpand(in vec3 x, in float cutoff, in float mul) {
 /***********************************************************************/
 // Dithering functions
 
-//note: returns [-intensity;intensity[, magnitude of 2x intensity
-//note: from "NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE"
-//      http://advances.realtimerendering.com/s2014/index.html
-float InterleavedGradientNoise(vec2 uv) {
-    const vec3 magic = vec3( 0.06711056, 0.00583715, 52.9829189 );
-    return fract( magic.z * fract( dot( uv, magic.xy ) ) );
-}
+//https://www.shadertoy.com/view/MslGR8
 
-vec3 Dither(vec3 input) {
+#define DITHER_STATIC 0
+#define DITHER_ANIMATED 1
+
+#define DITHER DITHER_ANIMATED
+
+vec3 Dither1(vec3 input) {
 	//vec2 seed = gl_FragCoord.xy;
 	vec2 seed = gl_FragCoord.xy * 200.0;
-	float rnd = InterleavedGradientNoise(seed);
+#if (DITHER == DITHER_ANIMATED)
+	seed += 1337.0 * fract(gameFrame / 100.0);
+#endif
+
+	const vec3 magic = vec3( 0.06711056, 0.00583715, 52.9829189 );
+	float rnd = fract( magic.z * fract( dot( seed, magic.xy ) ) );
 	#if 1
 		return input + vec3(rnd, 1.0-rnd, rnd)/255.0;
 	#else
 		return input + vec3(rnd/255.0);
 	#endif
+}
+
+vec3 Dither2(vec3 input) {
+	// Iestyn's RGB dither (7 asm instructions) from Portal 2 X360, slightly modified for VR
+	vec2 seed = gl_FragCoord.xy;
+#if (DITHER == DITHER_ANIMATED)
+	seed += 1337.0 * fract(gameFrame / 100.0);
+#endif
+
+    vec3 vDither = vec3( dot( vec2( 171.0, 231.0 ), seed ) );
+    vDither = fract( vDither / vec3( 103.0, 71.0, 97.0 ) );
+    return input + (vDither / 255.0);
+}
+
+vec3 Dither3(vec3 input) {
+	//note: from comment by CeeJayDK
+	float dither_bit = 8.0; //Bit-depth of display. Normally 8 but some LCD monitors are 7 or even 6-bit.
+
+	vec2 seed = gl_FragCoord.xy;
+#if (DITHER == DITHER_ANIMATED)
+	seed += 1337.0 * fract(gameFrame / 100.0);
+#endif
+
+	//Calculate grid position
+	float grid_position = fract( dot( seed - vec2(0.5,0.5) , vec2(1.0 / 16.0, 10.0 / 36.0) + 0.25 ) );
+
+	//Calculate how big the shift should be
+	float dither_shift = (0.25) * (1.0 / (pow(2.0, dither_bit) - 1.0));
+
+	//Shift the individual colors differently, thus making it even harder to see the dithering pattern
+	vec3 dither_shift_RGB = vec3(dither_shift, -dither_shift, dither_shift); //subpixel dithering
+
+	//modify shift acording to grid position.
+	dither_shift_RGB = mix(2.0 * dither_shift_RGB, -2.0 * dither_shift_RGB, grid_position); //shift acording to grid position.
+
+	//shift the color by dither_shift
+	return input + 0.5/255.0 + dither_shift_RGB;
 }
 
 /***********************************************************************/
@@ -607,6 +650,8 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
 
+	//return N;
+
 	//TODO: figure out which one looks better
 	float occlusion = mix(1.0, groundShadowDensity, 1.0 - mat.occlusion);
 	#if 0
@@ -654,7 +699,16 @@ vec3 GetTerrainNormal(vec2 uv) {
 	return normal;
 }
 
-#line 20650
+// RNM - Already unpacked
+// https://www.shadertoy.com/view/4t2SzR
+vec3 NormalBlendUnpackedRNM(vec3 n1, vec3 n2) {
+	n1 += vec3(0.0, 0.0, 1.0);
+	n2 *= vec3(-1.0, -1.0, 1.0);
+
+    return n1 * dot(n1, n2) / n1.z - n2;
+}
+
+#line 20711
 
 void main() {
 
@@ -771,12 +825,17 @@ void main() {
 		// TODO: do branchless?
 		if (material[i].weight > 0.0) {
 			vec3 blendNormalTBN = material[i].blendNormal;
-			vec3 N = worldTBN * blendNormalTBN; //blended already because of TBN transformation?
-			//vec3 N = terrainWorldNormal;
-			vec3 R = -normalize(reflect(V, N));
+			#if 1
+				vec3 N = worldTBN * blendNormalTBN; //blended already because of TBN transformation?
+			#else
+				vec3 terrainNormalTBN = invWorldTBN * terrainWorldNormal; //vec3(0, 1, 0) ?
+				vec3 N = worldTBN * NormalBlendUnpackedRNM(terrainNormalTBN, blendNormalTBN);
+			#endif
 
-			// TODO: figure this out
+			//N = terrainWorldNormal;
 			N = normalize(N);
+
+			vec3 R = -normalize(reflect(V, N));
 
 			float NdotLu = dot(N, L);
 

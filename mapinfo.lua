@@ -307,16 +307,16 @@ local mapinfo = {
 					--weight = "texture(tex20, (mapTexCoords)).r",
 					--weight = "1.0",
 					weight = "1.0 - mapTexCoords.x",
-					baseColor = "texture(tex6, 2.0 * mapTexCoords).rgb",
-					blendNormal = "DXUnpackNormals(texture(tex7, 2.0 * mapTexCoords).xyz)",
-					roughness = "texture(tex8, 2.0 * mapTexCoords).r",
+					baseColor = "texture(tex6, 1.0 * mapTexCoords).rgb",
+					blendNormal = "DXUnpackNormals(texture(tex7, 1.0 * mapTexCoords).xyz)",
+					roughness = "texture(tex8, 1.0 * mapTexCoords).r",
 
-					occlusion = "texture(tex9, 2.0 * mapTexCoords).r",
-					metalness = "0.0",
+					occlusion = "texture(tex9, 1.0 * mapTexCoords).r",
+					metalness = "1.0",
 
 					specularF0 = "0.004",
 
-					height = "texture(tex11, 2.0 * mapTexCoords).r",
+					height = "texture(tex11, 1.0 * mapTexCoords).r",
 				},
 				--{ },
 				--{ },

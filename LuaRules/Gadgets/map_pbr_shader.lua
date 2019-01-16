@@ -183,7 +183,7 @@ local pbrMapDefaultDefinitions = {
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
 	["SHADOW_SAMPLES"] = "3", --number of shadow map samples, "1" will revert to standard spring shadows
-	["IBL_SPECULAR_LOD_BIAS"] = "2.5", --positive number will make all cubemap reflections blurry by this LOD value.
+	["IBL_SPECULAR_LOD_BIAS"] = "0", --positive number will make all cubemap reflections blurry by this LOD value.
 	["IBL_DIFFUSECOLOR"] = "",  -- replaces IBL diffuse sampling result with color value defined here
 	["IBL_SPECULARCOLOR"] = "", -- replaces IBL specular sampling result with color value defined here
 	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
@@ -569,7 +569,8 @@ local function UpdateSomeUniforms()
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
 		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)
-		--fwdShaderObj:SetUniformFloat("cameraPos", Spring.GetCameraPosition())
+		--local gf = Spring.GetGameFrame()
+		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
 	end)
 end
 

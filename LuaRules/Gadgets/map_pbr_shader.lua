@@ -171,6 +171,7 @@ end
 
 local pbrMapDefaultDefinitions = {
 	["SUN_COLOR"] = LuaToGLSL({gl.GetSun("diffuse")}),
+	["TERRAIN_NORMAL_BLEND"] = "", -- Detailed Terrain Normals Texture. Optional, Must be in TBN space
 	["FAST_GAMMA"] = "0", -- Faster gamma correction makes darker area apear brighter. Doesn't look to good.
 	["WEIGHT_CUTOFF"] = "10.0/255.0",
 	["POM_MAXSTEPS"] = "32",
@@ -182,8 +183,8 @@ local pbrMapDefaultDefinitions = {
 	["OUTPUT_EXPOSURE(preExpColor)"] = "preExpColor",
 	["OUTPUT_TONEMAPPING(preTMColor)"] = "preTMColor", -- See full list of TM operators in the shader code
 	["OUTPUT_GAMMACORRECTION(preGammaColor)"] = "toSRGB(preGammaColor)",
-	["SHADOW_SAMPLES"] = "3", --number of shadow map samples, "1" will revert to standard spring shadows
-	["IBL_SPECULAR_LOD_BIAS"] = "0", --positive number will make all cubemap reflections blurry by this LOD value.
+	["SHADOW_SAMPLES"] = "3", -- number of shadow map samples, "1" will revert to standard spring shadows
+	["IBL_SPECULAR_LOD_BIAS"] = "0", -- positive number will make all cubemap reflections blurry by this LOD value.
 	["IBL_DIFFUSECOLOR"] = "",  -- replaces IBL diffuse sampling result with color value defined here
 	["IBL_SPECULARCOLOR"] = "", -- replaces IBL specular sampling result with color value defined here
 	["IBL_GAMMACORRECTION(color)"] = "color", --change to "fromSRGB(color)" if you feel IBL gamma correction is required
@@ -404,6 +405,10 @@ local function ParseEverything()
 	local splatsCode, splatsWeightHeightCode, hasDefaultSplat, splatCount = ParseSplats(pbrMap)
 	pbrMap.definitions["HAS_DEFAULT_SPLAT"] = (hasDefaultSplat and "1") or "0"
 
+	if pbrMap.definitions["TERRAIN_NORMAL_BLEND"] ~= "" then
+		pbrMap.definitions["TERRAIN_NORMAL_BLEND_DO"] = "1"
+	end
+
 	if pbrMap.definitions["IBL_INVERSE_TONEMAP_MUL"] ~= "" then
 		pbrMap.definitions["IBL_INVERSE_TONEMAP"] = "1"
 	end
@@ -415,7 +420,7 @@ local function ParseEverything()
 	if pbrMap.definitions["IBL_SPECULARCOLOR"] ~= "" then
 		pbrMap.definitions["IBL_SPECULARCOLOR_STATIC"] = "1"
 	end
-	
+
 	if pbrMap.definitions["MAT_BLENDING_HEIGHT_SMOOTHNESS"] ~= "" then
 		pbrMap.definitions["MAT_BLENDING_HEIGHT"] = "1"
 	end
@@ -498,7 +503,7 @@ function gadget:Initialize()
 
 	local vertCodeTmpl = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
 	local fragCodeTmpl = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
-	
+
 	local vertCode = string.format("%s", vertCodeTmpl)
 	vertCode = vertCode:gsub("###CUSTOM_DEFINITIONS###", customDefinitions)
 

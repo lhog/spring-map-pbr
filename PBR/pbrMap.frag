@@ -779,6 +779,19 @@ void main() {
 	vec3 worldBitangent = normalize( cross(terrainWorldNormal, worldTangent) );
 
 	mat3 worldTBN = mat3(worldTangent, worldBitangent, terrainWorldNormal); //from tangent space to world space
+
+	#if (TERRAIN_NORMAL_BLEND_DO == 1)
+		terrainWorldNormal = worldTBN * TERRAIN_NORMAL_BLEND;
+		// TODO: find out if results are same below
+		#if 1 // Gram-Schmidt process.
+			worldTangent = normalize(worldTangent - terrainWorldNormal * dot(terrainWorldNormal, worldTangent));
+		#else // Regular process
+			worldTangent = normalize( cross(terrainWorldNormal, vec3(0.0, 0.0, 1.0)));
+		#endif
+		worldBitangent = normalize( cross(terrainWorldNormal, worldTangent) );
+		worldTBN = mat3(worldTangent, worldBitangent, terrainWorldNormal);
+	#endif
+
 	mat3 invWorldTBN = transpose(worldTBN); //from world space to tangent space
 
 	#if (POM_MAXSTEPS > 0)

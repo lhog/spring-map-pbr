@@ -390,7 +390,7 @@ float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
 			float wx = float(ssHalf - abs(x) + 1) / ssSum;
 			for( int y = -ssHalf; y <= ssHalf; y++ ) {
 				float wy = float(ssHalf - abs(y) + 1) / ssSum;
-				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y));
+				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
 			}
 		}
 	#endif

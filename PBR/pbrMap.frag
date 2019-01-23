@@ -60,8 +60,6 @@ uniform float gameFrame;
 
 #if (HAVE_SHADOWS == 1)
 	uniform sampler2DShadow shadowTex;
-	uniform mat4 shadowMat;
-	uniform vec4 shadowParams;
 #endif
 
 #ifdef SMF_WATER_ABSORPTION
@@ -81,7 +79,9 @@ in Data {
 #if (HAVE_INFOTEX == 1)
 	vec2 infoTexCoords;
 #endif
-
+#if (HAVE_SHADOWS == 1)
+	vec4 shadowTexCoord;
+#endif
 	float fogFactor;
 } fromVS;
 
@@ -373,7 +373,8 @@ struct VectorDotsInfo {
 float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
 	NdotL = clamp(NdotL, 0.0, 1.0);
 	const float cb = 0.00005;
-	float bias = cb * tan(acos(NdotL));
+	//float bias = cb * tan(acos(NdotL));
+	float bias = cb * sqrt (1.0 - NdotL * NdotL) / NdotL; // same as above, but cheaper!
 	bias = clamp(bias, 0.01 * cb, 5.0 * cb);
 
 	float coeff = 0.0;
@@ -868,18 +869,13 @@ void main() {
 
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
-		// TODO: figure out if this can be moved to Vertex Shader
-		vec4 shadowTexCoord = shadowMat * vertexWorldPos;
-		shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);
-		shadowTexCoord.xy += shadowParams.xy;
-
 		// TODO: figure out performance implications of conditional
 		#if 0
 			if (NdotL > 0.0) {
-				shadowG = GetShadowCoeff(shadowTexCoord, NdotL);
+				shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
 			}
 		#else
-			shadowG = GetShadowCoeff(shadowTexCoord, NdotL);
+			shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
 		#endif
 	#endif
 

@@ -59,7 +59,10 @@ uniform float gameFrame;
 #endif
 
 #if (HAVE_SHADOWS == 1)
-	uniform sampler2DShadow shadowTex;
+	//uniform sampler2DShadow shadowTex;
+	uniform sampler2D shadowTexDepth;
+	uniform mat4 shadowMat;
+	uniform vec4 shadowParams;	
 #endif
 
 #ifdef SMF_WATER_ABSORPTION
@@ -90,7 +93,7 @@ in Data {
 
 ###CUSTOM_CODE###
 
-#line 10091
+#line 10094
 
 /***********************************************************************/
 // Gamma forward and inverse correction procedures
@@ -338,6 +341,37 @@ vec3 Dither3(vec3 input) {
 	return input + 0.5/255.0 + dither_shift_RGB;
 }
 
+
+/***********************************************************************/
+// Low discrepancy sampling methods
+
+// vec2([0, 1])
+vec2 HammersleyNorm(uint i, uint N) {
+	// Radical inverse based on http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+	uint bits = (i << 16u) | (i >> 16u);
+	bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+	bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+	bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+	bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+	float rdi = float(bits) * 2.3283064365386963e-10;
+	return vec2(float(i) /float(N), rdi);
+}
+
+// vec2([-1, 1])
+vec2 HammersleySNorm(uint i, uint N) {
+	return HammersleyNorm(i, N) * 2.0 - 1.0;
+}
+
+// Hammersley Disk is slightly worse quality than Poisson Disk in low discrepancy, but doesn't need precompute.
+vec2 HammersleyDisk(uint i, uint N) {
+    vec2 h = HammersleySNorm(i, N);
+    return vec2(
+        h.x * sqrt(1.0 - 0.5 * h.y *h.y),
+        h.y * sqrt(1.0 - 0.5 * h.x *h.x)
+    );
+}
+
+
 /***********************************************************************/
 // Material and vectors struct
 
@@ -370,36 +404,91 @@ struct VectorDotsInfo {
 /***********************************************************************/
 // Shadow Mapping Stuff
 #if (HAVE_SHADOWS == 1)
-float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
+
+// Derivatives of light-space depth with respect to texture2D coordinates
+vec2 DepthGradient(vec3 shadowCoordsProj) {
+    vec2 dz_duv = vec2(0.0, 0.0);
+
+    vec3 duvdist_dx = dFdx(shadowCoordsProj);
+    vec3 duvdist_dy = dFdy(shadowCoordsProj);
+
+    dz_duv.x = duvdist_dy.y * duvdist_dx.z;
+    dz_duv.x -= duvdist_dx.y * duvdist_dy.z;
+
+    dz_duv.y = duvdist_dx.x * duvdist_dy.z;
+    dz_duv.y -= duvdist_dy.x * duvdist_dx.z;
+
+    float det = (duvdist_dx.x * duvdist_dy.y) - (duvdist_dx.y * duvdist_dy.x);
+    dz_duv /= det;
+
+    return dz_duv;
+}
+
+vec4 GetShadowCoordsBiased(vec4 shadowCoords, float NdotL) {
 	NdotL = clamp(NdotL, 0.0, 1.0);
 	const float cb = 0.00005;
+
 	//float bias = cb * tan(acos(NdotL));
 	float bias = cb * sqrt (1.0 - NdotL * NdotL) / NdotL; // same as above, but cheaper!
+
 	bias = clamp(bias, 0.01 * cb, 5.0 * cb);
+
+	shadowCoords.z -= bias;
+
+	return shadowCoords;
+}
+
+#define BLOCKER_SAMPLES 32u
+#define PCF_SAMPLES 32
+float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
+	int blockers = 0;
+	float avgBlockerDistance = 0;
+
+	shadowCoords = GetShadowCoordsBiased(shadowCoords, NdotL);
+	shadowCoords /= shadowCoords.w;
+
+	//float searchWidth = SearchWidth(uvLightSize, shadowCoords.z);
+	float searchWidth = 0.1;
+
+	for (uint i = 0u; i < BLOCKER_SAMPLES; ++i)
+	{
+		vec4 shadowCoordsX = shadowCoords;
+		shadowCoordsX.xy += HammersleyDisk(i, BLOCKER_SAMPLES) * searchWidth;
+		float z = texture(shadowTexDepth, shadowCoords.xy).x;
+
+		//if (textureProj( shadowTex, shadowCoords ) < 0.5) {
+		if (z < shadowCoordsX.z) {
+			blockers++;
+			avgBlockerDistance += z;
+		}
+	}
+
+	return blockers > 0 ? avgBlockerDistance / blockers : -1.0;
+}
+
+float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
+
+	shadowCoords = GetShadowCoordsBiased(shadowCoords, NdotL);
 
 	float coeff = 0.0;
 
 	#if (SHADOW_SAMPLES == 1)
-		coeff = textureProj( shadowTex, shadowCoords + vec4(0.0, 0.0, bias, 0.0) );
+		//coeff = textureProj( shadowTex, shadowCoords );
 	#else
 		const int ssHalf = int(floor(float(SHADOW_SAMPLES)/2.0));
 		const float ssSum = float((ssHalf + 1) * (ssHalf + 1));
-
-		shadowCoords += vec4(0.0, 0.0, -bias, 0.0);
 
 		for( int x = -ssHalf; x <= ssHalf; x++ ) {
 			float wx = float(ssHalf - abs(x) + 1) / ssSum;
 			for( int y = -ssHalf; y <= ssHalf; y++ ) {
 				float wy = float(ssHalf - abs(y) + 1) / ssSum;
-				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
+				//coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
 			}
 		}
 	#endif
 
-	coeff  = (1.0 - coeff);
-	coeff *= smoothstep(0.1, 1.0, coeff);
-
-	coeff *= groundShadowDensity;
+	coeff = 1.0 - coeff;
+	coeff *= smoothstep(0.1, 1.0, coeff) * groundShadowDensity;
 	return (1.0 - coeff);
 }
 #endif
@@ -543,6 +632,11 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 	}
 #endif
 
+//https://github.com/urho3d/Urho3D/blob/master/bin/CoreData/Shaders/GLSL/IBL.glsl
+float GetMipFromRoughness(float roughness, float lodMax) {
+	return (roughness * (lodMax + 1.0) - pow(roughness, 6.0) * 1.5);
+}
+
 #define PBR_F_SCHLICK_KHRONOS 1
 #define PBR_F_SCHLICK_SASCHA 2
 #define PBR_F_SCHLICK_GOOGLE 3
@@ -610,7 +704,11 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	// Image Based Lighting
 	ivec2 reflectionTexSize = textureSize(reflectionTex, 0);
 	float reflectionTexMaxLOD = log2(float(max(reflectionTexSize.x, reflectionTexSize.y)));
-	float specularLOD = reflectionTexMaxLOD * roughness;
+	#if 0
+		float specularLOD = reflectionTexMaxLOD * roughness;
+	#else
+		float specularLOD = GetMipFromRoughness(roughness, reflectionTexMaxLOD);
+	#endif
 	specularLOD += IBL_SPECULAR_LOD_BIAS;
 
 	#if (IBL_DIFFUSECOLOR_STATIC == 1)
@@ -650,8 +748,6 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
-
-	//return N;
 
 	//TODO: figure out which one looks better
 	float occlusion = mix(1.0, groundShadowDensity, 1.0 - mat.occlusion);
@@ -851,6 +947,9 @@ void main() {
 
 			vec3 R = -normalize(reflect(V, N));
 
+			//gl_FragColor.rgb = vec3(R.x<0.0, R.y<0.0, R.z<0.0);
+			//return;
+
 			float NdotLu = dot(N, L);
 
 			vdi.NdotL = clamp(NdotLu, 0.001, 1.0);
@@ -867,6 +966,11 @@ void main() {
 
 	float shadowG = 1.0;
 
+	vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w;
+	//gl_FragColor.rg = DepthGradient(shadowTexCoordProj);
+	//gl_FragColor.b = 0.0;
+	//return;
+
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
 		// TODO: figure out performance implications of conditional
@@ -881,7 +985,26 @@ void main() {
 
 	//gl_FragColor.rg = vec2(1.0 - shadowN, 1.0 - shadowG);
 	//gl_FragColor.b = 0.0;
-	//return;
+	//gl_FragColor.rgb = vec3(abs(texture(shadowTexDepth, shadowTexCoordProj.xy).x - shadowTexCoordProj.z));
+	//gl_FragColor.rgb = vec3( float(textureProj(shadowTexDepth, fromVS.shadowTexCoord.xyw).r - (fromVS.shadowTexCoord.z-0.001)) );
+	
+	//#define vertexShadowPos fromVS.shadowTexCoord
+	
+	vec4 vertexShadowPos = shadowMat * vertexWorldPos;
+	vertexShadowPos.xy *= (inversesqrt(abs(vertexShadowPos.xy) + shadowParams.zz) + shadowParams.ww);
+	vertexShadowPos.xy += shadowParams.xy;	
+
+	float bias = 0.0;
+	float shadowTexResult = float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w);
+	//gl_FragColor.rgb = vec3( mix(1.0, shadowTexResult, groundShadowDensity) );
+	gl_FragColor.rgb = textureProj(shadowTexDepth, vertexShadowPos.xyw).rrr;
+
+	//gl_FragColor.rgb = vec3( float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w) );
+	//gl_FragColor.rgb = vec3( float(textureProj(shadowTex, fromVS.shadowTexCoord.xyzw)) );
+	return;
+
+	gl_FragColor.rgb = vec3(FindBlockerDistance(fromVS.shadowTexCoord, NdotL) * 0.1);
+	return;
 
 	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;

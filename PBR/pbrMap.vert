@@ -49,8 +49,13 @@ void main() {
 
 #if (HAVE_SHADOWS == 1)
 	shadowTexCoord = shadowMat * vertexWorldPos;
-	shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);
-	shadowTexCoord.xy += shadowParams.xy;
+	#if 1
+		//shadowTexCoord /= shadowTexCoord.w;
+		shadowTexCoord.xy = shadowTexCoord.xy + 0.5;
+	#else
+		shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);
+		shadowTexCoord.xy += shadowParams.xy;
+	#endif
 #endif
 
 	// transform vertex pos

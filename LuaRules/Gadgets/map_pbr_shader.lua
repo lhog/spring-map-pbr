@@ -476,6 +476,7 @@ function gadget:Initialize()
 	boundSamplers["diffuseTex"] = 0
 
 	boundSamplers["shadowTex"] = 27
+	boundSamplers["shadowTexDepth"] = 27
 	boundSamplers["infoTex"] = 28
 	boundSamplers["terrainNormalsTex"] = 29
 	boundSamplers["reflectionTex"] = 30

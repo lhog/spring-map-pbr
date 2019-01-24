@@ -252,18 +252,24 @@ local mapinfo = {
 		pbr = {
 			enabled = true,
 			textures = {
+--[[
 				[2] = "Ice_001/Ice_001_COLOR.jpg",
 				[3] = "Ice_001/Ice_001_SPEC.jpg",
 				[4] = "Ice_001/Ice_001_NRM.jpg",
 				[5] = "Ice_001/Ice_001_OCC.jpg",
-
-				[6] = "Rocks_006_2K/Rocks06_col.jpg",
-				[7] = "Rocks_006_2K/Rocks06_nrm.jpg",
-				[8] = "Rocks_006_2K/Rocks06_rgh.jpg",
-				[9] = "Rocks_006_2K/Rocks06_AO.jpg",
-
 				[10] = "Ice_001/Ice_001_DISP.png",
-				[11] = "Rocks_006_2K/Rocks06_disp.jpg",
+]]--
+				[2] = "Ground_026_2K/Ground26_col.jpg",
+				[3] = "Ground_026_2K/Ground26_nrm.jpg",
+				[4] = "Ground_026_2K/Ground26_rgh.jpg",
+				[5] = "Ground_026_2K/Ground26_AO.jpg",
+				[10] = "Ground_026_2K/Ground26_disp.jpg",
+
+				[6] = "Rocks_001_2K/Rocks01_col.jpg",
+				[7] = "Rocks_001_2K/Rocks01_nrm.jpg",
+				[8] = "Rocks_001_2K/Rocks01_rgh.jpg",
+				[9] = "Rocks_001_2K/Rocks01_AO.jpg",
+				[11] = "Rocks_001_2K/Rocks01_disp.jpg",
 
 				--[3] = "Blue_Ice_001_SD/Blue_Ice_001_COLOR.jpg",
 				[20] = "icedist.dds",
@@ -284,11 +290,13 @@ local mapinfo = {
 				--["OUTPUT_TONEMAPPING(preTMColor)"] = "SteveMTM2(preTMColor)"
 			},
 			splats = {
+--[[
 				{
 					workflow = "SPECULAR",
 					--specularF0 = "0.01",
 					--weight = "1.0",
 					--weight = "texture(tex20, (mapTexCoords)).g",
+					--weight = "1.0",
 					weight = "mapTexCoords.x",
 					diffuseColor = "fromSRGB(texture(tex2, 15.0 * mapTexCoords).rgb)",
 					specularColor = "fromSRGB(texture(tex3, 15.0 * mapTexCoords).rgb)",
@@ -299,24 +307,41 @@ local mapinfo = {
 
 
 					--height = "texture(tex10, 15.0 * mapTexCoords).r",
-					height = "0.5",
+					height = "0.1",
 				},
+]]--
 
 				{
 					workflow = "METALNESS",
 					--weight = "texture(tex20, (mapTexCoords)).r",
 					--weight = "1.0",
-					weight = "1.0 - mapTexCoords.x",
-					baseColor = "texture(tex6, 1.0 * mapTexCoords).rgb",
-					blendNormal = "DXUnpackNormals(texture(tex7, 1.0 * mapTexCoords).xyz)",
-					roughness = "texture(tex8, 1.0 * mapTexCoords).r",
+					weight = "mapTexCoords.x",
+					baseColor = "texture(tex2, 1.0 * mapTexCoords).rgb",
+					blendNormal = "DXUnpackNormals(texture(tex3, 1.0 * mapTexCoords).xyz)",
+					roughness = "texture(tex4, 1.0 * mapTexCoords).r",
 
-					occlusion = "texture(tex9, 1.0 * mapTexCoords).r",
+					occlusion = "texture(tex5, 1.0 * mapTexCoords).r",
 					metalness = "1.0",
 
 					specularF0 = "0.004",
 
-					height = "texture(tex11, 1.0 * mapTexCoords).r",
+					height = "texture(tex10, 1.0 * mapTexCoords).r",
+				},
+				{
+					workflow = "METALNESS",
+					--weight = "texture(tex20, (mapTexCoords)).r",
+					--weight = "1.0",
+					weight = "1.0 - mapTexCoords.x",
+					baseColor = "texture(tex6, 4.0 * mapTexCoords).rgb",
+					blendNormal = "DXUnpackNormals(texture(tex7, 4.0 * mapTexCoords).xyz)",
+					roughness = "texture(tex8, 4.0 * mapTexCoords).r",
+
+					occlusion = "texture(tex9, 4.0 * mapTexCoords).r",
+					metalness = "1.0",
+
+					specularF0 = "0.004",
+
+					height = "texture(tex11, 4.0 * mapTexCoords).r",
 				},
 				--{ },
 				--{ },

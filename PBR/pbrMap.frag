@@ -379,9 +379,43 @@ vec2 HammersleyNorm(int i, int N) {
 	return vec2( i, b ) / vec2( N, 0xffffffffU );
 }
 
+// vec2([0, 1])
+const vec2 p0 = vec2(M_PI/2.0, 0.5);
+vec2 GoldenRatioNorm(int i) {
+    return fract(p0 + vec2(i*12664745, i*9560333)/float(0x1000000));
+}
+
+// Disk vec2([-1, 1])
+//  Normalize N beforehand
+// 	float Nn = round(sqrt(float(N)));
+//	Nn *= Nn;
+
+vec2 ConcentricDisk(int i, int N) {
+    float ringI = floor(sqrt(float(i)));
+    float ringN = floor(sqrt(Nn));
+
+	float RMul = 1.0 / (float(ringN) - 1.0);
+
+    float RSub = 2.0 * ringI + 1.0;
+
+    float ringS = float(i) - ringI * ringI;
+
+    float R = RMul * ringI;
+    float Phi = ringS / RSub;
+    Phi += 0.25 * ringI / ringN;
+    //Phi += fract(0.5 + ringI * invGR1);
+    Phi *= M_PI2;
+    vec2 res = vec2(cos(Phi), sin(Phi)) * R;
+    return res;
+}
+
 #define HammersleySNorm(i, N) NORM2SNORM(HammersleyNorm(i, N))
 #define HammersleyDisk(i, N) DISK2D(HammersleySNorm(i, N))
 #define HammersleyDiskLin(i, N) DISKLIN(HammersleyDisk(i, N))
+
+#define GoldenRatioSNorm(i) NORM2SNORM(GoldenRatioNorm(i))
+#define GoldenRatioDisk(i) DISK2D(GoldenRatioSNorm(i))
+#define GoldenRatioDiskLin(i) DISKLIN(GoldenRatioDisk(i))
 
 
 /***********************************************************************/
@@ -479,8 +513,8 @@ float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
 }
 */
 
-#define PCSS_BLOCKER_SAMPLES 16
-#define PCF_SAMPLES 32
+#define PCSS_BLOCKER_SAMPLES 32
+#define PCF_SAMPLES 64
 
 const float almostZero = 0.0 + 1e-3;
 const float almostOne = 1.0 - almostZero;
@@ -515,7 +549,7 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 	}
 	#endif
 
-	vec2 depthRemapParam = RemapDepthRangeParams(lightProjNF.x, lightProjNF.x + 500.0);
+	//vec2 depthRemapParam = RemapDepthRangeParams(lightProjNF.x, lightProjNF.x + 500.0);
 
 	float rndRotAngle = hash12S(shadowCoordsBiased.xy) * M_PI2;
 	vec2 rSinCos = vec2(sin(rndRotAngle), cos(rndRotAngle));
@@ -523,7 +557,7 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 
 	vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
 
-	const float uvLightSize = 0.0015; //TODO: fix me
+	const float uvLightSize = 0.001; //TODO: fix me
 
 	float avgBlockerDepth = 0.0;
 	float numBlocker = 0.0;
@@ -532,7 +566,7 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize;
 		float z = SampleShadowTexDepth(shadowSamplingCoords, shadowTexSize);
 
-		#if 1
+		#if 0
 		if (z < shadowCoordsBiased.z) {
 			avgBlockerDepth += z;
 			numBlocker++;
@@ -554,7 +588,8 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 
 	#if 1
 		float penumbraRatio = (shadowCoordsBiased.z - avgBlockerDepth) / avgBlockerDepth;
-		penumbraRatio = RemapDepthRange(penumbraRatio, depthRemapParam);
+		penumbraRatio *= 20.0;
+		//penumbraRatio = RemapDepthRange(penumbraRatio, depthRemapParam);
 	#else
 		// Offset preventing aliasing on contact.
 		float AAOffset = 10.0 / shadowTexSize.x;
@@ -571,8 +606,7 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 	}
 	shadow /= float(PCF_SAMPLES);
 
-	shadow = mix(shadow, 1.0, shadowCoordsBiased.z - avgBlockerDepth);
-
+	shadow = mix(shadow, 1.0, (shadowCoordsBiased.z - avgBlockerDepth) * 10.0);
 	return mix(1.0, shadow, groundShadowDensity);
 }
 //float GetShadowPCF
@@ -1125,7 +1159,7 @@ void main() {
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
 		vec4 shCoordBiased = GetShadowCoordsBiased(fromVS.shadowTexCoord, NdotL);
-		//vec4 shCoordBiased = fromVS.shadowTexCoord;
+		//shCoordBiased = fromVS.shadowTexCoord;
 		// TODO: figure out performance implications of conditional
 		#if 0
 			if (NdotL > 0.0) {

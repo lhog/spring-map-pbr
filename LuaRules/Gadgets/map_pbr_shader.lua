@@ -581,6 +581,7 @@ local function UpdateSomeUniforms()
 		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
 
 		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
+		Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
 		fwdShaderObj:SetUniformFloat("lightProjNF", lightProjNear, lightProjFar)
 	end)
 end
@@ -620,7 +621,7 @@ end
 function gadget:DrawWorldShadow()
 	--Spring.Echo("gadget:DrawWorldShadow()")
 	fwdShaderObj:ActivateWith( function()
-		Spring.Echo("shadowMat", gl.GetMatrixData("shadow"))
+		--Spring.Echo("shadowMat", gl.GetMatrixData("shadow"))
 		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
 		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
 	end)

@@ -27,6 +27,7 @@ out Data {
 	vec2 infoTexCoords;
 #endif
 #if (HAVE_SHADOWS == 1)
+	//mat4 invShadowMat;
 	vec4 shadowTexCoord;
 #endif
 	float fogFactor;
@@ -48,9 +49,9 @@ void main() {
 #endif
 
 #if (HAVE_SHADOWS == 1)
+	//invShadowMat = inverse(shadowMat);
 	shadowTexCoord = shadowMat * vertexWorldPos;
 	#if 1
-		//shadowTexCoord /= shadowTexCoord.w;
 		shadowTexCoord.xy = shadowTexCoord.xy + 0.5;
 	#else
 		shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);

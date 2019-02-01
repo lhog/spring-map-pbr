@@ -276,7 +276,7 @@ local mapinfo = {
 			},
 			definitions = {
 				["SUN_COLOR"] = "vec3(1.0)",
-				["SHADOW_SAMPLES"] = "1",
+				["SHADOW_SAMPLES"] = "8",
 				--["WEIGHT_CUTOFF"] = "0.3",
 				["MAT_BLENDING_HEIGHT_SMOOTHNESS"] = "0.2",
 				--["PBR_SCHLICK_SMITH_GGX"] = "PBR_SCHLICK_SMITH_GGX_THIN",
@@ -337,7 +337,7 @@ local mapinfo = {
 					roughness = "texture(tex8, 4.0 * mapTexCoords).r",
 
 					occlusion = "texture(tex9, 4.0 * mapTexCoords).r",
-					metalness = "1.0",
+					metalness = "0.0",
 
 					specularF0 = "0.004",
 

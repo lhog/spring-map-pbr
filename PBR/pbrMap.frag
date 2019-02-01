@@ -59,10 +59,9 @@ uniform float gameFrame;
 #endif
 
 #if (HAVE_SHADOWS == 1)
-	//uniform sampler2DShadow shadowTex;
-	uniform sampler2D shadowTexDepth;
-	uniform mat4 shadowMat;
-	uniform vec4 shadowParams;	
+	uniform sampler2DShadow shadowTex;
+	uniform sampler2D shadowTexDepth; //only usable with texelFetch, see https://www.opengl.org/discussion_boards/showthread.php/200048-Can-you-use-sampler2D-and-sampler2DShadow-on-the-same-texture
+	uniform vec2 lightProjNF; //Near and Far planes of Light's projection matrix
 #endif
 
 #ifdef SMF_WATER_ABSORPTION
@@ -83,6 +82,7 @@ in Data {
 	vec2 infoTexCoords;
 #endif
 #if (HAVE_SHADOWS == 1)
+	//mat4 invShadowMat;
 	vec4 shadowTexCoord;
 #endif
 	float fogFactor;
@@ -93,7 +93,18 @@ in Data {
 
 ###CUSTOM_CODE###
 
-#line 10094
+#line 10096
+
+/***********************************************************************/
+// Hash functions
+
+// For smaller input rangers like audio tick or 0-1 UVs use these...
+float hash12S(vec2 p) {
+	const float HASHSCALE1 = 443.8975;
+	vec3 p3  = fract(vec3(p.xyx) * HASHSCALE1);
+    p3 += dot(p3, p3.yzx + 19.19);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 /***********************************************************************/
 // Gamma forward and inverse correction procedures
@@ -341,35 +352,36 @@ vec3 Dither3(vec3 input) {
 	return input + 0.5/255.0 + dither_shift_RGB;
 }
 
+/***********************************************************************/
+// Various transformations
+
+#define NORM2SNORM(value) (value * 2.0 - 1.0)
+#define SNORM2NORM(value) (value * 0.5 + 0.5)
+#define DISK2D(xy) (xy * sqrt( 1.0 - 0.5 * xy * xy ).yx)
+
+// Lame way...
+#define DISKLIN_FACTOR 2.0
+#define DISKLIN(xy) (xy * (length(xy) + DISKLIN_FACTOR) / (1.0 + DISKLIN_FACTOR))
+
 
 /***********************************************************************/
 // Low discrepancy sampling methods
 
 // vec2([0, 1])
-vec2 HammersleyNorm(uint i, uint N) {
-	// Radical inverse based on http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
-	uint bits = (i << 16u) | (i >> 16u);
-	bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-	bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-	bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-	bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-	float rdi = float(bits) * 2.3283064365386963e-10;
-	return vec2(float(i) /float(N), rdi);
+vec2 HammersleyNorm(int i, int N) {
+    // principle: reverse bit sequence of i
+	uint b =  ( uint(i) << 16u) | (uint(i) >> 16u );
+	b = (b & 0x55555555u) << 1u | (b & 0xAAAAAAAAu) >> 1u;
+	b = (b & 0x33333333u) << 2u | (b & 0xCCCCCCCCu) >> 2u;
+	b = (b & 0x0F0F0F0Fu) << 4u | (b & 0xF0F0F0F0u) >> 4u;
+	b = (b & 0x00FF00FFu) << 8u | (b & 0xFF00FF00u) >> 8u;
+
+	return vec2( i, b ) / vec2( N, 0xffffffffU );
 }
 
-// vec2([-1, 1])
-vec2 HammersleySNorm(uint i, uint N) {
-	return HammersleyNorm(i, N) * 2.0 - 1.0;
-}
-
-// Hammersley Disk is slightly worse quality than Poisson Disk in low discrepancy, but doesn't need precompute.
-vec2 HammersleyDisk(uint i, uint N) {
-    vec2 h = HammersleySNorm(i, N);
-    return vec2(
-        h.x * sqrt(1.0 - 0.5 * h.y *h.y),
-        h.y * sqrt(1.0 - 0.5 * h.x *h.x)
-    );
-}
+#define HammersleySNorm(i, N) NORM2SNORM(HammersleyNorm(i, N))
+#define HammersleyDisk(i, N) DISK2D(HammersleySNorm(i, N))
+#define HammersleyDiskLin(i, N) DISKLIN(HammersleyDisk(i, N))
 
 
 /***********************************************************************/
@@ -406,11 +418,11 @@ struct VectorDotsInfo {
 #if (HAVE_SHADOWS == 1)
 
 // Derivatives of light-space depth with respect to texture2D coordinates
-vec2 DepthGradient(vec3 shadowCoordsProj) {
+vec2 DepthGradient(vec3 shadowCoords) {
     vec2 dz_duv = vec2(0.0, 0.0);
 
-    vec3 duvdist_dx = dFdx(shadowCoordsProj);
-    vec3 duvdist_dy = dFdy(shadowCoordsProj);
+    vec3 duvdist_dx = dFdx(shadowCoords);
+    vec3 duvdist_dy = dFdy(shadowCoords);
 
     dz_duv.x = duvdist_dy.y * duvdist_dx.z;
     dz_duv.x -= duvdist_dx.y * duvdist_dy.z;
@@ -438,8 +450,8 @@ vec4 GetShadowCoordsBiased(vec4 shadowCoords, float NdotL) {
 	return shadowCoords;
 }
 
-#define BLOCKER_SAMPLES 32u
-#define PCF_SAMPLES 32
+
+/*
 float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
 	int blockers = 0;
 	float avgBlockerDistance = 0;
@@ -450,7 +462,7 @@ float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
 	//float searchWidth = SearchWidth(uvLightSize, shadowCoords.z);
 	float searchWidth = 0.1;
 
-	for (uint i = 0u; i < BLOCKER_SAMPLES; ++i)
+	for (int i = 0; i < BLOCKER_SAMPLES; ++i)
 	{
 		vec4 shadowCoordsX = shadowCoords;
 		shadowCoordsX.xy += HammersleyDisk(i, BLOCKER_SAMPLES) * searchWidth;
@@ -465,15 +477,117 @@ float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
 
 	return blockers > 0 ? avgBlockerDistance / blockers : -1.0;
 }
+*/
 
-float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
+#define PCSS_BLOCKER_SAMPLES 16
+#define PCF_SAMPLES 32
 
-	shadowCoords = GetShadowCoordsBiased(shadowCoords, NdotL);
+const float almostZero = 0.0 + 1e-3;
+const float almostOne = 1.0 - almostZero;
+float SampleShadowTexDepth(vec2 shadowCoords, vec2 shadowTexSize) {
+	ivec2 shadowTexTexel = ivec2(round(shadowCoords * shadowTexSize));
+	float valid = float( all( greaterThanEqual(shadowCoords, vec2(almostZero)) && lessThanEqual(shadowCoords, vec2(almostOne)) ) );
+
+	// return 1.1 (if valid == 0.0) so shadow is never here at such fragment
+	return mix(1.1, texelFetch(shadowTexDepth, shadowTexTexel, 0).r, valid);
+}
+
+float GetLightViewZ(float d) {
+	return lightProjNF.x + (lightProjNF.y - lightProjNF.x) * d;
+}
+
+vec2 RemapDepthRangeParams(float newNear, float newFar) {
+	float den = newFar - newNear;
+	return vec2(lightProjNF.y - lightProjNF.x, lightProjNF.x - newNear) / den;
+}
+
+float RemapDepthRange(float d, vec2 param) {
+	d = d * param.x + param.y;
+
+	return d;
+	//return clamp(d, 0.0, 1.0);
+}
+
+float GetShadowPCSS(vec4 shadowCoordsBiased) {
+	#if 1
+	if (any(bvec2(shadowCoordsBiased.z > 1.0, shadowCoordsBiased.z < 0.0))) { //not sure if needed
+		return 1.0;
+	}
+	#endif
+
+	vec2 depthRemapParam = RemapDepthRangeParams(lightProjNF.x, lightProjNF.x + 500.0);
+
+	float rndRotAngle = hash12S(shadowCoordsBiased.xy) * M_PI2;
+	vec2 rSinCos = vec2(sin(rndRotAngle), cos(rndRotAngle));
+	mat2 rRotMat = mat2(rSinCos.y, -rSinCos.x, rSinCos.x, rSinCos.y);
+
+	vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
+
+	const float uvLightSize = 0.0015; //TODO: fix me
+
+	float avgBlockerDepth = 0.0;
+	float numBlocker = 0.0;
+
+	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; ++i) {
+		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize;
+		float z = SampleShadowTexDepth(shadowSamplingCoords, shadowTexSize);
+
+		#if 1
+		if (z < shadowCoordsBiased.z) {
+			avgBlockerDepth += z;
+			numBlocker++;
+		}
+		#else
+			float condition = float(z < shadowCoordsBiased.z);
+			avgBlockerDepth += mix(0.0, z, condition); //non-branching if
+			numBlocker += mix(0.0, 1.0, condition); //non-branching if
+		#endif
+	}
+
+	#if 1
+	if (numBlocker < 1.0) { //bail out quickly
+		return 1.0;
+	}
+	#endif
+
+	avgBlockerDepth /= numBlocker;
+
+	#if 1
+		float penumbraRatio = (shadowCoordsBiased.z - avgBlockerDepth) / avgBlockerDepth;
+		penumbraRatio = RemapDepthRange(penumbraRatio, depthRemapParam);
+	#else
+		// Offset preventing aliasing on contact.
+		float AAOffset = 10.0 / shadowTexSize.x;
+		float penumbraRatio = ((shadowCoordsBiased.z - avgBlockerDepth) + AAOffset);
+	#endif
+
+	float filterRadius = penumbraRatio * uvLightSize;
+
+	float shadow = 0.0;
+	for (int i = 0; i < PCF_SAMPLES; i++) {
+		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterRadius;
+		vec3 shadowSamplingCoords = shadowCoordsBiased.xyz + vec3(offset, 0.0);
+		shadow += texture( shadowTex, shadowSamplingCoords );
+	}
+	shadow /= float(PCF_SAMPLES);
+
+	shadow = mix(shadow, 1.0, shadowCoordsBiased.z - avgBlockerDepth);
+
+	return mix(1.0, shadow, groundShadowDensity);
+}
+//float GetShadowPCF
+//float GetShadowPoisson
+//float GetShadowSingle
+
+
+float GetShadowCoeff(vec4 shadowCoords) {
+
+	//shadowCoords = GetShadowCoordsBiased(shadowCoords, NdotL);
 
 	float coeff = 0.0;
 
 	#if (SHADOW_SAMPLES == 1)
-		//coeff = textureProj( shadowTex, shadowCoords );
+		coeff = textureProj( shadowTex, shadowCoords );
 	#else
 		const int ssHalf = int(floor(float(SHADOW_SAMPLES)/2.0));
 		const float ssSum = float((ssHalf + 1) * (ssHalf + 1));
@@ -482,7 +596,7 @@ float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
 			float wx = float(ssHalf - abs(x) + 1) / ssSum;
 			for( int y = -ssHalf; y <= ssHalf; y++ ) {
 				float wy = float(ssHalf - abs(y) + 1) / ssSum;
-				//coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
+				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
 			}
 		}
 	#endif
@@ -490,6 +604,8 @@ float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
 	coeff = 1.0 - coeff;
 	coeff *= smoothstep(0.1, 1.0, coeff) * groundShadowDensity;
 	return (1.0 - coeff);
+
+	//return coeff;
 }
 #endif
 
@@ -749,6 +865,8 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
 
+	//return iblSpecularLight;
+
 	//TODO: figure out which one looks better
 	float occlusion = mix(1.0, groundShadowDensity, 1.0 - mat.occlusion);
 	#if 0
@@ -756,7 +874,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	#else
 		return (sunLitDiffColor + sunLitSpecColor) + (iblLitDiffColor + iblLitSpecColor) * occlusion;
 	#endif
-	//return iblLitSpecColor;
+
 }
 
 /***********************************************************************/
@@ -805,7 +923,7 @@ vec3 NormalBlendUnpackedRNM(vec3 n1, vec3 n2) {
     return n1 * dot(n1, n2) / n1.z - n2;
 }
 
-#line 20711
+#line 20973
 
 void main() {
 
@@ -966,45 +1084,97 @@ void main() {
 
 	float shadowG = 1.0;
 
-	vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w;
+	//vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w;
+	//vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz;
 	//gl_FragColor.rg = DepthGradient(shadowTexCoordProj);
 	//gl_FragColor.b = 0.0;
 	//return;
+	//float NdotL = dot(terrainWorldNormal, L);
+	//vec4 shCoordsBiased = GetShadowCoordsBiased(fromVS.shadowTexCoord, NdotL);
+	//gl_FragColor.rgb = vec3(GetShadowPCSS(shCoordsBiased));
+	//gl_FragColor.rgb = vec3(GetShadowCoeff(fromVS.shadowTexCoord));
+	//float dLin = -2.0 * shadowTexCoordProj.z / (lightProjNF.y - lightProjNF.x);
+	//float dLin = 0.5 * shadowTexCoordProj.z * (lightProjNF.y - lightProjNF.x) / lightProjNF.y;
+
+	//float dLin = float( shadowTexCoordProj.z - SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)) ) * 10.0;
+	//float dLin = GetShadowPCSS(fromVS.shadowTexCoord);
+
+	//float linShCoordZ = GetLightViewZ(shadowTexCoordProj.z);
+	//float linShTexZ = GetLightViewZ( SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)) );
+
+	//float dLin = float(( linShCoordZ - linShTexZ ) / lightProjNF.y * 10.0 > 0.2);
+	//vec4 occluderWorld = fromVS.invShadowMat * vec4(fromVS.shadowTexCoord.xy - 0.5, SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)), 1.0);
+	//float dLin = float( distance(occluderWorld, vertexWorldPos) / 1000.0 > 0.2);
+
+	//float dLin = float( any(greaterThan(fromVS.shadowTexCoord.xy, vec2(1.0))) || any(lessThan(fromVS.shadowTexCoord.xy, vec2(0.0))) );
+	//float dLin = float( any(greaterThan(fromVS.shadowTexCoord.xy, vec2(1.0))) || any(lessThan(fromVS.shadowTexCoord.xy, vec2(0.0))) );
+
+	//float dLin = float( abs(fromVS.shadowTexCoord.z - fromVS.shadowTexCoord.z/fromVS.shadowTexCoord.w) ) * 10000.0;
+
+	//float dLin = lightProjNF.y;
+	//gl_FragColor.rgb = vec3(dLin);
+
+	///gl_FragColor.rgb = vec3(abs(fromVS.shadowTexCoord.xyz - fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w)) * 10000.0;
+	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.z);
+
+	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.xy, 0.0);
+
+	//return;
+
 
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
+		vec4 shCoordBiased = GetShadowCoordsBiased(fromVS.shadowTexCoord, NdotL);
+		//vec4 shCoordBiased = fromVS.shadowTexCoord;
 		// TODO: figure out performance implications of conditional
 		#if 0
 			if (NdotL > 0.0) {
-				shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
+				#if 0
+					shadowG = GetShadowCoeff(shCoordBiased);
+				#else
+					shadowG = GetShadowPCSS(shCoordBiased);
+				#endif
 			}
 		#else
-			shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
+			#if 0
+				shadowG = GetShadowCoeff(shCoordBiased);
+			#else
+				shadowG = GetShadowPCSS(shCoordBiased);
+			#endif
 		#endif
 	#endif
+
+	gl_FragColor.rgb = vec3(shadowG);
+	return;
 
 	//gl_FragColor.rg = vec2(1.0 - shadowN, 1.0 - shadowG);
 	//gl_FragColor.b = 0.0;
 	//gl_FragColor.rgb = vec3(abs(texture(shadowTexDepth, shadowTexCoordProj.xy).x - shadowTexCoordProj.z));
-	//gl_FragColor.rgb = vec3( float(textureProj(shadowTexDepth, fromVS.shadowTexCoord.xyw).r - (fromVS.shadowTexCoord.z-0.001)) );
-	
+	/*
+	#if 1
+	{
+		vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
+		ivec2 shadowTexCoordTex = ivec2(round(shadowTexCoordProj.xy * shadowTexSize));
+		gl_FragColor.rgb = vec3( float( texelFetch(shadowTexDepth, shadowTexCoordTex, 0).r > (shadowTexCoordProj.z-0.0001) ) );
+	}
+	//gl_FragColor.rgb = vec3( float(texture(shadowTexDepth, shadowTexCoordProj.xy).r > (shadowTexCoordProj.z-0.001)) );
+	#else
+	gl_FragColor.rgb = vec3( textureProj( shadowTex, fromVS.shadowTexCoord ) );
+	#endif
+	*/
+
 	//#define vertexShadowPos fromVS.shadowTexCoord
-	
-	vec4 vertexShadowPos = shadowMat * vertexWorldPos;
-	vertexShadowPos.xy *= (inversesqrt(abs(vertexShadowPos.xy) + shadowParams.zz) + shadowParams.ww);
-	vertexShadowPos.xy += shadowParams.xy;	
 
-	float bias = 0.0;
-	float shadowTexResult = float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w);
-	//gl_FragColor.rgb = vec3( mix(1.0, shadowTexResult, groundShadowDensity) );
-	gl_FragColor.rgb = textureProj(shadowTexDepth, vertexShadowPos.xyw).rrr;
+	//float bias = 0.0;
+	//float shadowTexResult = float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r - (vertexShadowPos.z-bias)/vertexShadowPos.w);
 
+	//gl_FragColor.rgb = vec3(shadowTexResult);
 	//gl_FragColor.rgb = vec3( float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w) );
 	//gl_FragColor.rgb = vec3( float(textureProj(shadowTex, fromVS.shadowTexCoord.xyzw)) );
-	return;
+	//return;
 
-	gl_FragColor.rgb = vec3(FindBlockerDistance(fromVS.shadowTexCoord, NdotL) * 0.1);
-	return;
+	//gl_FragColor.rgb = vec3(FindBlockerDistance(fromVS.shadowTexCoord, NdotL) * 0.1);
+	//return;
 
 	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;

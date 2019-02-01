@@ -548,6 +548,7 @@ function gadget:UnsyncedHeightMapUpdate()
 end
 
 
+local SHADOW_CAMERA_ID = 2
 local function UpdateSomeUniforms()
 	if firstTime then
 		--genBrdfLut:Execute(true)
@@ -575,8 +576,12 @@ local function UpdateSomeUniforms()
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
 		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)
+
 		--local gf = Spring.GetGameFrame()
 		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
+
+		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
+		fwdShaderObj:SetUniformFloat("lightProjNF", lightProjNear, lightProjFar)
 	end)
 end
 
@@ -612,19 +617,17 @@ function gadget:GotChatMsg(msg, player)
 	end
 end
 
-
 function gadget:DrawWorldShadow()
 	--Spring.Echo("gadget:DrawWorldShadow()")
 	fwdShaderObj:ActivateWith( function()
+		Spring.Echo("shadowMat", gl.GetMatrixData("shadow"))
 		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
 		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
 	end)
 
 end
 
-
 local function BindTextures()
-
 	gl.Texture(27, "$shadow")
 	gl.Texture(28, "$info")
 	gl.Texture(29, "$normals")
@@ -649,8 +652,6 @@ function gadget:DrawGroundPreForward()
 		end)
 	end
 end
-
-
 
 function gadget:Shutdown()
 	genBrdfLut:Finalize()

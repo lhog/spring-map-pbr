@@ -61,18 +61,20 @@ function GenBrdfLut:GetTexture()
 	return self.brdfTexture
 end
 
-function GenBrdfLut:Execute(isScreenSpace)
+function GenBrdfLut:Execute(saveDebug)
 	if gl.IsValidFBO(self.brdfFBO) then
 		gl.ActiveShader(self.brdfShader, function ()
 			gl.ActiveFBO(self.brdfFBO, function()
 				gl.DepthTest(false)
 				gl.Blending(false)
-				if isScreenSpace then
-					gl.TexRect(0, 0, self.textureSize, self.textureSize)
-				else
+				gl.PushPopMatrix(function()
+					gl.MatrixMode(GL.PROJECTION); gl.LoadIdentity();
+					gl.MatrixMode(GL.MODELVIEW); gl.LoadIdentity();
 					gl.TexRect(-1, -1, 1, 1)
+				end)
+				if saveDebug then
+					gl.SaveImage( 0, 0, self.textureSize, self.textureSize, string.format("brdf_%s.png", select(1, Spring.GetGameFrame())) )
 				end
-				--gl.SaveImage( 0, 0, self.textureSize, self.textureSize, string.format("brdf_%s.png", select(1, Spring.GetGameFrame())) )
 			end)
 		end)
 	end

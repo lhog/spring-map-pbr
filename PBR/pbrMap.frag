@@ -21,7 +21,7 @@
 const float SMF_SHALLOW_WATER_DEPTH     = 10.0;
 const float SMF_SHALLOW_WATER_DEPTH_INV = 1.0 / SMF_SHALLOW_WATER_DEPTH;
 
-const float M_PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062;
+const float M_PI = 3.14159265359;
 const float M_PI2 = M_PI * 2.0;
 
 const float MIN_ROUGHNESS = 0.04;
@@ -42,10 +42,12 @@ uniform samplerCube reflectionTex;
 #define tex(num) tex##num
 
 // Uniforms
-uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
-uniform vec2 mapTexGen; // 1.0/mapSize
+uniform vec2 normalTexGen;	// either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
+uniform vec2 mapTexGen;		// 1.0/mapSize
 
-uniform vec4 lightDir;
+uniform vec4 lightDir;		// mapInfo->light.sunDir
+uniform mat4 lightViewMat;
+
 uniform vec3 lightColor = SUN_COLOR;
 
 uniform float groundShadowDensity; //useful for NdotL shading as well, so keep it unconditional
@@ -78,11 +80,12 @@ in Data {
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
+	//float viewDistance;
 #if (HAVE_INFOTEX == 1)
 	vec2 infoTexCoords;
 #endif
 #if (HAVE_SHADOWS == 1)
-	//mat4 invShadowMat;
+	vec4 shadowViewCoords;
 	vec4 shadowTexCoord;
 #endif
 	float fogFactor;
@@ -392,7 +395,7 @@ vec2 GoldenRatioNorm(int i) {
 
 vec2 ConcentricDisk(int i, int N) {
     float ringI = floor(sqrt(float(i)));
-    float ringN = floor(sqrt(Nn));
+    float ringN = floor(sqrt(float(N)));
 
 	float RMul = 1.0 / (float(ringN) - 1.0);
 
@@ -475,7 +478,7 @@ vec4 GetShadowCoordsBiased(vec4 shadowCoords, float NdotL) {
 	const float cb = 0.00005;
 
 	//float bias = cb * tan(acos(NdotL));
-	float bias = cb * sqrt (1.0 - NdotL * NdotL) / NdotL; // same as above, but cheaper!
+	float bias = cb * sqrt(1.0 - NdotL * NdotL) / NdotL; // same as above, but cheaper!
 
 	bias = clamp(bias, 0.01 * cb, 5.0 * cb);
 
@@ -513,13 +516,37 @@ float FindBlockerDistance(vec4 shadowCoords, float NdotL) {
 }
 */
 
+mat4 calculateLookAtMatrix(vec3 eye, vec3 center, vec3 up) {
+
+    vec3 zaxis = normalize(center - eye);
+    vec3 xaxis = normalize(cross(up, zaxis));
+    vec3 yaxis = cross(xaxis, zaxis);
+
+    mat4 lookAtMatrix;
+
+    lookAtMatrix[0] = vec4(xaxis.x, yaxis.x, zaxis.x, 0.0);
+    lookAtMatrix[1] = vec4(xaxis.y, yaxis.y, zaxis.y, 0.0);
+    lookAtMatrix[2] = vec4(xaxis.z, yaxis.z, zaxis.z, 0.0);
+    lookAtMatrix[3] = vec4(dot(xaxis, -eye), dot(yaxis, -eye), dot(zaxis, -eye), 1.0);
+
+    return lookAtMatrix;
+}
+
+mat4 calculateLookAtMatrix(vec3 eye, vec3 center, float roll) {
+    return calculateLookAtMatrix(eye, center, vec3(sin(roll), cos(roll), 0.0));
+}
+
 #define PCSS_BLOCKER_SAMPLES 32
 #define PCF_SAMPLES 64
 
 const float almostZero = 0.0 + 1e-3;
 const float almostOne = 1.0 - almostZero;
 float SampleShadowTexDepth(vec2 shadowCoords, vec2 shadowTexSize) {
-	ivec2 shadowTexTexel = ivec2(round(shadowCoords * shadowTexSize));
+	#if 1
+		ivec2 shadowTexTexel = ivec2(round(shadowCoords * shadowTexSize));
+	#else
+		ivec2 shadowTexTexel = ivec2(round(shadowCoords * (shadowTexSize - 1.0) + 0.5));
+	#endif
 	float valid = float( all( greaterThanEqual(shadowCoords, vec2(almostZero)) && lessThanEqual(shadowCoords, vec2(almostOne)) ) );
 
 	// return 1.1 (if valid == 0.0) so shadow is never here at such fragment
@@ -542,6 +569,56 @@ float RemapDepthRange(float d, vec2 param) {
 	//return clamp(d, 0.0, 1.0);
 }
 
+const float gConstant = 0.3989422804; // 1/sqrt(M_PI2);
+float GetGaussianWeight(float x, float sigma) {
+	return gConstant * exp(- 0.5 * x * x / (sigma * sigma)) / sigma;
+}
+
+float GetShadowPCFBox(vec3 shadowCoords, mat2 rotMat, vec2 filterSize) {
+	float shadow = 0.0;
+	for (int i = 0; i < PCF_SAMPLES; i++) {
+		vec2 offset = (rotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterSize;
+
+		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, 0.0);
+		shadow += texture( shadowTex, shadowSamplingCoords );
+	}
+	return shadow / float(PCF_SAMPLES);
+
+}
+
+float GetShadowPCFTriangle(vec3 shadowCoords, mat2 rotMat, vec2 filterSize) {
+	float shadow = 0.0;
+	float weightSum = 0.0;
+	for (int i = 0; i < PCF_SAMPLES; i++) {
+		vec2 offset = (rotMat * HammersleyDiskLin(i, PCF_SAMPLES));
+
+		float weight = 1.0 - length(offset);
+		offset *= filterSize;
+		weightSum += weight;
+
+		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, 0.0);
+		shadow += weight * texture( shadowTex, shadowSamplingCoords );
+	}
+	return shadow / weightSum;
+}
+
+#define GAUSSIAN_ARG_MULTIPLIER 5.0 //most gaussian drawings have argument that lasts from -5.0 to 5.0
+float GetShadowPCFGaussian(vec3 shadowCoords, mat2 rotMat, vec2 filterSize, float sigma) {
+	float shadow = 0.0;
+	float weightSum = 0.0;
+	for (int i = 0; i < PCF_SAMPLES; i++) {
+		vec2 offset = (rotMat * HammersleyDiskLin(i, PCF_SAMPLES));
+
+		float weight = GetGaussianWeight(GAUSSIAN_ARG_MULTIPLIER * length(offset), sigma);
+		offset *= filterSize;
+		weightSum += weight;
+
+		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, 0.0);
+		shadow += weight * texture( shadowTex, shadowSamplingCoords );
+	}
+	return shadow / weightSum;
+}
+
 float GetShadowPCSS(vec4 shadowCoordsBiased) {
 	#if 1
 	if (any(bvec2(shadowCoordsBiased.z > 1.0, shadowCoordsBiased.z < 0.0))) { //not sure if needed
@@ -562,8 +639,22 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 	float avgBlockerDepth = 0.0;
 	float numBlocker = 0.0;
 
+	const float eps = 1e-6;
+
+	vec2 dShTdx = max( abs(dFdx(fromVS.shadowTexCoord.xy)), eps );
+	vec2 dShTdy = max( abs(dFdy(fromVS.shadowTexCoord.xy)), eps );
+
+	vec2 dShVdx = abs(dFdx(fromVS.shadowViewCoords.xy));
+	vec2 dShVdy = abs(dFdy(fromVS.shadowViewCoords.xy));
+
+	vec2 shadowViewScaleVec = vec2( length(dShVdx) / length(dShTdx), length(dShVdy) / length(dShTdy) ) * mapTexGen;
+
+	vec2 shadowScaleFactor = 1.0/max( shadowViewScaleVec, eps );
+
+	//shadowScaleFactor = 1.0;
+
 	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; ++i) {
-		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize;
+		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize * shadowScaleFactor;
 		float z = SampleShadowTexDepth(shadowSamplingCoords, shadowTexSize);
 
 		#if 0
@@ -588,28 +679,47 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 
 	#if 1
 		float penumbraRatio = (shadowCoordsBiased.z - avgBlockerDepth) / avgBlockerDepth;
-		penumbraRatio *= 20.0;
+		//penumbraRatio *= 10.0;
 		//penumbraRatio = RemapDepthRange(penumbraRatio, depthRemapParam);
 	#else
 		// Offset preventing aliasing on contact.
 		float AAOffset = 10.0 / shadowTexSize.x;
 		float penumbraRatio = ((shadowCoordsBiased.z - avgBlockerDepth) + AAOffset);
+
 	#endif
 
-	float filterRadius = penumbraRatio * uvLightSize;
+	penumbraRatio *= 20.0;
 
-	float shadow = 0.0;
-	for (int i = 0; i < PCF_SAMPLES; i++) {
-		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterRadius;
-		vec3 shadowSamplingCoords = shadowCoordsBiased.xyz + vec3(offset, 0.0);
-		shadow += texture( shadowTex, shadowSamplingCoords );
-	}
-	shadow /= float(PCF_SAMPLES);
+	//return penumbraRatio;
 
-	shadow = mix(shadow, 1.0, (shadowCoordsBiased.z - avgBlockerDepth) * 10.0);
+	//penumbraRatio *= pow(2.0 - max(fromVS.viewDistance / 9000.0, 1.0), 2.0);
+	//return penumbraRatio;
+
+	//penumbraRatio = clamp(penumbraRatio, 0.0, 1.5);
+
+	vec2 filterSize = penumbraRatio * uvLightSize * shadowScaleFactor;
+
+	#define PCF_BOX 1
+	#define PCF_TRIANGLE 2
+	#define PCF_GAUSSIAN 3
+
+	#define PCF PCF_BOX
+	#if (PCF == PCF_BOX)
+		float shadow = GetShadowPCFBox(shadowCoordsBiased.xyz, rRotMat, filterSize);
+	#elif (PCF == PCF_TRIANGLE)
+		float shadow = GetShadowPCFTriangle(shadowCoordsBiased.xyz, rRotMat, filterSize);
+	#elif (PCF == PCF_GAUSSIAN)
+		#define GAUSSIAN_SIGMA 2.0
+		float shadow = GetShadowPCFGaussian(shadowCoordsBiased.xyz, rRotMat, filterSize, GAUSSIAN_SIGMA);
+	#endif
+
+	shadow = mix(shadow, 1.0, penumbraRatio * 0.25);
 	return mix(1.0, shadow, groundShadowDensity);
 }
-//float GetShadowPCF
+
+float GetShadowPCF(vec4 shadowCoordsBiased) {
+	return 1.0;
+}
 //float GetShadowPoisson
 //float GetShadowSingle
 
@@ -926,12 +1036,16 @@ vec3 terrainWorldNormal;
 #define MAT_COUNT ###MATERIALS_COUNT###
 MaterialInfo material[MAT_COUNT];
 
-vec2 flipUV(vec2 uv) {
-	return vec2(uv.x, 1.0 - uv.y);
-}
+#define flipVertically(uv) (vec2(uv.x, 1.0 - uv.y))
 
-#define DXUnpackNormals(xyz) ((2.0 * xyz - 1.0) * vec3(1.0, -1.0, 1.0))
-#define OGLUnpackNormals(xyz) (2.0 * xyz - 1.0)
+#define UnpackNormalsScaled(xyz, scale) (normalize(NORM2SNORM(xyz) * scale))
+#define UnpackNormalsUnscaled(xyz) (normalize(NORM2SNORM(xyz)))
+
+#define OGLUnpackNormals(xyz) UnpackNormalsUnscaled(xyz)
+#define DXUnpackNormals(xyz) UnpackNormalsScaled(xyz, vec3(1.0, -1.0, 1.0))
+
+#define OGLUnpackNormalsScaled(xyz, scale) UnpackNormalsScaled(xyz, scale)
+#define DXUnpackNormalsScaled(xyz, scale) UnpackNormalsScaled(xyz, vec3(1.0, -1.0, 1.0) * scale)
 
 void FillMaterialWeightsHeights() {
 ###MATERIAL_WEIGHTS_HEIGHTS###
@@ -1101,6 +1215,10 @@ void main() {
 
 			//gl_FragColor.rgb = vec3(R.x<0.0, R.y<0.0, R.z<0.0);
 			//return;
+			//gl_FragColor.rgb = SNORM2NORM(DXUnpackNormals(texture(tex7, 4.0 * mapTexCoords).xyz));
+			//gl_FragColor.rgb = SNORM2NORM(texture(tex7, 4.0 * mapTexCoords).xyz);
+			//gl_FragColor.rgb = SNORM2NORM(R);
+			//return;
 
 			float NdotLu = dot(N, L);
 
@@ -1153,8 +1271,9 @@ void main() {
 
 	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.xy, 0.0);
 
-	//return;
 
+
+	//return;
 
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop

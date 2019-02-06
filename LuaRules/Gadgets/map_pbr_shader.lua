@@ -445,7 +445,53 @@ local function ParseEverything()
 	return samplerUniformsCode, splatsCode, splatsWeightHeightCode, customDefinitions, pbrMap.customCode, splatCount, boundTexUnits
 end
 
+local function normalize3(a)
+	local x, y, z = a.x or 0, a.y or 0, a.z or 0
+	local N = x * x +  y * y + z * z
+	N = math.sqrt(N)
+	return {x = x / N, y = y / N, z = z / N}
+end
 
+local function crossProduct3(a, b)
+	local x, y, z
+	x = a.y * b.z - a.z * b.y
+	y = a.z * b.x - a.x * b.z
+	z = a.x * b.y - a.y * b.x
+	return { x = x, y = y, z = z }
+end
+
+local function dotProduct3(a, b)
+	return a.x * b.x + a.y * b.y + a.z * b.z
+end
+
+local function GetLookAtMatrix(eye, center, upOrRoll)
+	eye.x = eye.x or 0
+	eye.y = eye.y or 0
+	eye.z = eye.z or 0
+
+	center.x = center.x or 0
+	center.y = center.y or 0
+	center.z = center.z or 0
+
+	if type(upOrRoll) == "number" then
+		upOrRoll = {x = math.sin(upOrRoll), y = math.cos(upOrRoll), z = 0.0}
+	end
+
+	local zaxis = normalize3({ x = center.x - eye.x, y = center.y - eye.y, z = center.z - eye.z})
+	local xaxis = normalize3(crossProduct3(zaxis, upOrRoll))
+	local yaxis = crossProduct3(xaxis, zaxis)
+
+	local m00, m01, m02, m03 = xaxis.x, yaxis.x, zaxis.x, 0.0
+	local m10, m11, m12, m13 = xaxis.y, yaxis.y, zaxis.y, 0.0
+	local m20, m21, m22, m23 = xaxis.z, yaxis.z, zaxis.z, 0.0
+
+	local m30, m31, m32, m33 = -dotProduct3(xaxis, eye), -dotProduct3(yaxis, eye), -dotProduct3(zaxis, eye), 1.0
+
+	return {m00, m01, m02, m03,
+			m10, m11, m12, m13,
+			m20, m21, m22, m23,
+			m30, m31, m32, m33}
+end
 
 --  Gadget Global Vars  --
 local fwdShaderObjValid = false
@@ -454,7 +500,7 @@ local fwdShaderObj = nil
 local firstTime = true
 local updateHeights = true
 
-local oldSunPos = {-1, -1, -1}
+local cachedSunPos = {-1, -1, -1}
 local updateSunPos = false
 
 local genBrdfLut = nil
@@ -536,10 +582,10 @@ end
 
 function gadget:Update(dt)
 	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
-	if (newSunX ~= oldSunPos[1] or newSunY ~= oldSunPos[2] or newSunZ ~= oldSunPos[3]) then
+	updateSunPos = (newSunX ~= cachedSunPos[1] or newSunY ~= cachedSunPos[2] or newSunZ ~= cachedSunPos[3])
+	if updateSunPos then
 		--Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
-		oldSunPos = { newSunX, newSunY, newSunZ }
-		updateSunPos = true
+		cachedSunPos = { newSunX, newSunY, newSunZ }
 	end
 end
 
@@ -551,12 +597,7 @@ end
 local SHADOW_CAMERA_ID = 2
 local function UpdateSomeUniforms()
 	if firstTime then
-		--genBrdfLut:Execute(true)
-		gl.PushPopMatrix(function()
-			gl.MatrixMode(GL.PROJECTION); gl.LoadIdentity();
-			gl.MatrixMode(GL.MODELVIEW); gl.LoadIdentity();
-			genBrdfLut:Execute(false)
-		end)
+		genBrdfLut:Execute()
 		firstTime = false
 	end
 
@@ -568,10 +609,12 @@ local function UpdateSomeUniforms()
 		end
 
 		if updateSunPos then
-			local sunPosX, sunPosY, sunPosZ = gl.GetSun("pos")
-			fwdShaderObj:SetUniformFloatAlways("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
-			Spring.Echo("sunPos", sunPosX, sunPosY, sunPosZ)
-			updateSunPos = false
+			--Spring.Echo("updateSunPos", Spring.GetGameFrame())
+			local lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, {x = 0.0, y = 0.0, z = 0.0}, 0.0)
+			--Spring.Echo("lightViewMat", unpack(lightViewMat))
+			fwdShaderObj:SetUniformMatrixAlways("lightViewMat", unpack(lightViewMat))
+
+			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3], 0.0)
 		end
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
@@ -581,7 +624,7 @@ local function UpdateSomeUniforms()
 		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
 
 		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
-		Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
+		--Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
 		fwdShaderObj:SetUniformFloat("lightProjNF", lightProjNear, lightProjFar)
 	end)
 end

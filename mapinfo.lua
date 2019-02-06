@@ -337,7 +337,7 @@ local mapinfo = {
 					roughness = "texture(tex8, 4.0 * mapTexCoords).r",
 
 					occlusion = "texture(tex9, 4.0 * mapTexCoords).r",
-					metalness = "0.0",
+					metalness = "1.0",
 
 					specularF0 = "0.004",
 

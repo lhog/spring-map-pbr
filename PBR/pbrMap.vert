@@ -5,6 +5,7 @@
 
 uniform ivec2 texSquare;
 uniform vec4 lightDir;       // mapInfo->light.sunDir
+uniform mat4 lightViewMat;
 
 uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
 uniform vec2 mapTexGen; // 1.0/mapSize
@@ -23,22 +24,24 @@ out Data {
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
+	//float viewDistance;
 #if (HAVE_INFOTEX == 1)
 	vec2 infoTexCoords;
 #endif
 #if (HAVE_SHADOWS == 1)
-	//mat4 invShadowMat;
+	vec4 shadowViewCoords;
 	vec4 shadowTexCoord;
 #endif
 	float fogFactor;
 };
 
 void main() {
-	// calc some lighting variables
-	viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
-	viewDir = viewDir - gl_Vertex.xyz;
 
 	vertexWorldPos = gl_Vertex;
+
+	// calc some lighting variables
+	viewDir = vec3(gl_ModelViewMatrixInverse * vec4(0.0, 0.0, 0.0, 1.0));
+	viewDir = viewDir - vertexWorldPos.xyz;
 
 	// calc texcoords
 	diffuseTexCoords = (floor(vertexWorldPos.xz) / SMF_TEXSQR_SIZE) - vec2(texSquare);
@@ -47,6 +50,8 @@ void main() {
 #if (HAVE_INFOTEX == 1)
 	infoTexCoords = vertexWorldPos.xz * infoTexGen;
 #endif
+
+	shadowViewCoords = lightViewMat * vertexWorldPos;
 
 #if (HAVE_SHADOWS == 1)
 	//invShadowMat = inverse(shadowMat);
@@ -60,8 +65,8 @@ void main() {
 #endif
 
 	// transform vertex pos
-	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
-	gl_ClipVertex = gl_ModelViewMatrix * gl_Vertex;
+	gl_Position = gl_ModelViewProjectionMatrix * vertexWorldPos;
+	gl_ClipVertex = gl_ModelViewMatrix * vertexWorldPos;
 
 #ifndef DEFERRED_MODE
 	// emulate linear fog

@@ -29,7 +29,6 @@ const float MIN_SPECULAR_F0 = 0.0001;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
-
 /***********************************************************************/
 // Samplers
 
@@ -63,7 +62,6 @@ uniform float gameFrame;
 #if (HAVE_SHADOWS == 1)
 	uniform sampler2DShadow shadowTex;
 	uniform sampler2D shadowTexDepth; //only usable with texelFetch, see https://www.opengl.org/discussion_boards/showthread.php/200048-Can-you-use-sampler2D-and-sampler2DShadow-on-the-same-texture
-	uniform vec2 lightProjNF; //Near and Far planes of Light's projection matrix
 #endif
 
 #ifdef SMF_WATER_ABSORPTION
@@ -553,22 +551,6 @@ float SampleShadowTexDepth(vec2 shadowCoords, vec2 shadowTexSize) {
 	return mix(1.1, texelFetch(shadowTexDepth, shadowTexTexel, 0).r, valid);
 }
 
-float GetLightViewZ(float d) {
-	return lightProjNF.x + (lightProjNF.y - lightProjNF.x) * d;
-}
-
-vec2 RemapDepthRangeParams(float newNear, float newFar) {
-	float den = newFar - newNear;
-	return vec2(lightProjNF.y - lightProjNF.x, lightProjNF.x - newNear) / den;
-}
-
-float RemapDepthRange(float d, vec2 param) {
-	d = d * param.x + param.y;
-
-	return d;
-	//return clamp(d, 0.0, 1.0);
-}
-
 const float gConstant = 0.3989422804; // 1/sqrt(M_PI2);
 float GetGaussianWeight(float x, float sigma) {
 	return gConstant * exp(- 0.5 * x * x / (sigma * sigma)) / sigma;
@@ -625,8 +607,6 @@ float GetShadowPCSS(vec4 shadowCoordsBiased) {
 		return 1.0;
 	}
 	#endif
-
-	//vec2 depthRemapParam = RemapDepthRangeParams(lightProjNF.x, lightProjNF.x + 500.0);
 
 	float rndRotAngle = hash12S(shadowCoordsBiased.xy) * M_PI2;
 	vec2 rSinCos = vec2(sin(rndRotAngle), cos(rndRotAngle));
@@ -1236,45 +1216,6 @@ void main() {
 
 	float shadowG = 1.0;
 
-	//vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w;
-	//vec3 shadowTexCoordProj = fromVS.shadowTexCoord.xyz;
-	//gl_FragColor.rg = DepthGradient(shadowTexCoordProj);
-	//gl_FragColor.b = 0.0;
-	//return;
-	//float NdotL = dot(terrainWorldNormal, L);
-	//vec4 shCoordsBiased = GetShadowCoordsBiased(fromVS.shadowTexCoord, NdotL);
-	//gl_FragColor.rgb = vec3(GetShadowPCSS(shCoordsBiased));
-	//gl_FragColor.rgb = vec3(GetShadowCoeff(fromVS.shadowTexCoord));
-	//float dLin = -2.0 * shadowTexCoordProj.z / (lightProjNF.y - lightProjNF.x);
-	//float dLin = 0.5 * shadowTexCoordProj.z * (lightProjNF.y - lightProjNF.x) / lightProjNF.y;
-
-	//float dLin = float( shadowTexCoordProj.z - SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)) ) * 10.0;
-	//float dLin = GetShadowPCSS(fromVS.shadowTexCoord);
-
-	//float linShCoordZ = GetLightViewZ(shadowTexCoordProj.z);
-	//float linShTexZ = GetLightViewZ( SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)) );
-
-	//float dLin = float(( linShCoordZ - linShTexZ ) / lightProjNF.y * 10.0 > 0.2);
-	//vec4 occluderWorld = fromVS.invShadowMat * vec4(fromVS.shadowTexCoord.xy - 0.5, SampleShadowTexDepth(shadowTexCoordProj.xy, textureSize(shadowTexDepth, 0)), 1.0);
-	//float dLin = float( distance(occluderWorld, vertexWorldPos) / 1000.0 > 0.2);
-
-	//float dLin = float( any(greaterThan(fromVS.shadowTexCoord.xy, vec2(1.0))) || any(lessThan(fromVS.shadowTexCoord.xy, vec2(0.0))) );
-	//float dLin = float( any(greaterThan(fromVS.shadowTexCoord.xy, vec2(1.0))) || any(lessThan(fromVS.shadowTexCoord.xy, vec2(0.0))) );
-
-	//float dLin = float( abs(fromVS.shadowTexCoord.z - fromVS.shadowTexCoord.z/fromVS.shadowTexCoord.w) ) * 10000.0;
-
-	//float dLin = lightProjNF.y;
-	//gl_FragColor.rgb = vec3(dLin);
-
-	///gl_FragColor.rgb = vec3(abs(fromVS.shadowTexCoord.xyz - fromVS.shadowTexCoord.xyz/fromVS.shadowTexCoord.w)) * 10000.0;
-	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.z);
-
-	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.xy, 0.0);
-
-
-
-	//return;
-
 	#if (HAVE_SHADOWS == 1)
 		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
 		vec4 shCoordBiased = GetShadowCoordsBiased(fromVS.shadowTexCoord, NdotL);
@@ -1297,65 +1238,9 @@ void main() {
 		#endif
 	#endif
 
-	gl_FragColor.rgb = vec3(shadowG);
-	return;
-
-	//gl_FragColor.rg = vec2(1.0 - shadowN, 1.0 - shadowG);
-	//gl_FragColor.b = 0.0;
-	//gl_FragColor.rgb = vec3(abs(texture(shadowTexDepth, shadowTexCoordProj.xy).x - shadowTexCoordProj.z));
-	/*
-	#if 1
-	{
-		vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
-		ivec2 shadowTexCoordTex = ivec2(round(shadowTexCoordProj.xy * shadowTexSize));
-		gl_FragColor.rgb = vec3( float( texelFetch(shadowTexDepth, shadowTexCoordTex, 0).r > (shadowTexCoordProj.z-0.0001) ) );
-	}
-	//gl_FragColor.rgb = vec3( float(texture(shadowTexDepth, shadowTexCoordProj.xy).r > (shadowTexCoordProj.z-0.001)) );
-	#else
-	gl_FragColor.rgb = vec3( textureProj( shadowTex, fromVS.shadowTexCoord ) );
-	#endif
-	*/
-
-	//#define vertexShadowPos fromVS.shadowTexCoord
-
-	//float bias = 0.0;
-	//float shadowTexResult = float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r - (vertexShadowPos.z-bias)/vertexShadowPos.w);
-
-	//gl_FragColor.rgb = vec3(shadowTexResult);
-	//gl_FragColor.rgb = vec3( float(textureProj(shadowTexDepth, vertexShadowPos.xyw).r > (vertexShadowPos.z-bias)/vertexShadowPos.w) );
-	//gl_FragColor.rgb = vec3( float(textureProj(shadowTex, fromVS.shadowTexCoord.xyzw)) );
-	//return;
-
-	//gl_FragColor.rgb = vec3(FindBlockerDistance(fromVS.shadowTexCoord, NdotL) * 0.1);
-	//return;
-
 	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;
-
 	gl_FragColor.rgb += emissionColor;
-
-	//gl_FragColor.rgb = material[0].baseColor;
-	//gl_FragColor.rgb =  BlendNormals(worldTBN * UnpackNormals(material[0].blendNormal));
-	//gl_FragColor.rgb = terrainWorldNormal;
-	//gl_FragColor.rgb = vec3( dot(terrainWorldNormal, H) );
-	//gl_FragColor.rgb = vec3( L );
-
-	//vec3 N = terrainWorldNormal;
-	//vec3 R = -normalize(reflect(V, N));
-	//gl_FragColor.rgb = textureLod(reflectionTex, N, 0.0).rgb;
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1375,4 +1260,3 @@ void main() {
 		gl_FragColor.rgb = OUTPUT_GAMMACORRECTION(gl_FragColor.rgb);
 	#endif
 }
-

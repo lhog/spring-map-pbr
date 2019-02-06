@@ -584,7 +584,6 @@ function gadget:Update(dt)
 	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
 	updateSunPos = (newSunX ~= cachedSunPos[1] or newSunY ~= cachedSunPos[2] or newSunZ ~= cachedSunPos[3])
 	if updateSunPos then
-		--Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
 		cachedSunPos = { newSunX, newSunY, newSunZ }
 	end
 end
@@ -593,8 +592,6 @@ function gadget:UnsyncedHeightMapUpdate()
 	updateHeights = true
 end
 
-
-local SHADOW_CAMERA_ID = 2
 local function UpdateSomeUniforms()
 	if firstTime then
 		genBrdfLut:Execute()
@@ -622,10 +619,6 @@ local function UpdateSomeUniforms()
 
 		--local gf = Spring.GetGameFrame()
 		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
-
-		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
-		--Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
-		fwdShaderObj:SetUniformFloat("lightProjNF", lightProjNear, lightProjFar)
 	end)
 end
 

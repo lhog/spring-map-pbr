@@ -469,6 +469,7 @@ local function GetLookAtMatrix(eye, center, upOrRoll)
 	eye.y = eye.y or 0
 	eye.z = eye.z or 0
 
+	center = center or {}
 	center.x = center.x or 0
 	center.y = center.y or 0
 	center.z = center.z or 0
@@ -598,7 +599,6 @@ local function PrettyPrintMatrix(mat)
 	return string.format("{{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f}}", mat[1], mat[2], mat[3], mat[4], mat[5], mat[6], mat[7], mat[8], mat[9], mat[10], mat[11], mat[12], mat[13], mat[14], mat[15], mat[16])
 end
 
-local SHADOW_CAMERA_ID = 2
 local function UpdateSomeUniforms()
 	if firstTime then
 		genBrdfLut:Execute()
@@ -613,18 +613,11 @@ local function UpdateSomeUniforms()
 		end
 
 		if updateSunPos then
-			--Spring.Echo("lightDir", unpack(cachedSunPos))
-			lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, {x = 0.0, y = 0.0, z = 0.0}, 0.0)
-			--Spring.Echo("lightViewMat", PrettyPrintMatrix(lightViewMat))
+			lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, nil, 0.0)
 			fwdShaderObj:SetUniformMatrixAlways("lightViewMat", unpack(lightViewMat))
 
-			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3], 0.0)
+			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3])
 		end
-
-		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
-		--Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
-		fwdShaderObj:SetUniformFloat("g_lightZNear", lightProjNear)
-		fwdShaderObj:SetUniformFloat("g_lightZFar", lightProjFar)
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
 		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)

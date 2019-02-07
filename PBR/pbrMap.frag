@@ -44,7 +44,7 @@ uniform samplerCube reflectionTex;
 uniform vec2 normalTexGen;	// either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
 uniform vec2 mapTexGen;		// 1.0/mapSize
 
-uniform vec4 lightDir;		// mapInfo->light.sunDir
+uniform vec3 lightDir;		// mapInfo->light.sunDir
 uniform mat4 lightViewMat;
 
 uniform vec3 lightColor = SUN_COLOR;
@@ -60,8 +60,6 @@ uniform float gameFrame;
 #endif
 
 #if (HAVE_SHADOWS == 1)
-	uniform float g_lightZNear;
-	uniform float g_lightZFar;
 	uniform vec2 lightProjScale; //[0, 1] ?
 	uniform sampler2DShadow shadowTex;
 	uniform sampler2D shadowTexDepth; //only usable with texelFetch, see https://www.opengl.org/discussion_boards/showthread.php/200048-Can-you-use-sampler2D-and-sampler2DShadow-on-the-same-texture
@@ -505,138 +503,6 @@ float GetShadowRandomDisk(vec3 shadowCoords, mat2 rotMat, vec2 filterSize, vec2 
 		shadow += texture( shadowTex, shadowSamplingCoords );
 	}
 	return shadow / float(PCF_SAMPLES);
-}
-
-const vec2 g_lightRadiusUV = vec2(0.005);
-// Using similar triangles from the surface point to the area light
-vec2 searchRegionRadiusUV(float zWorld)
-{
-    return g_lightRadiusUV * (zWorld - g_lightZNear) / zWorld;
-}
-
-// Using similar triangles between the area light, the blocking plane and the surface point
-vec2 penumbraRadiusUV(float zReceiver, float zBlocker)
-{
-    return g_lightRadiusUV * (zReceiver - zBlocker) / zBlocker;
-}
-
-// Project UV size to the near plane of the light
-vec2 projectToLightUV(vec2 sizeUV, float zWorld)
-{
-    return sizeUV * g_lightZNear / zWorld;
-}
-
-// Derivatives of light-space depth with respect to texture2D coordinates
-vec2 depthGradient(vec2 uv, float z)
-{
-    vec2 dz_duv = vec2(0.0, 0.0);
-
-    vec3 duvdist_dx = dFdx(vec3(uv,z));
-    vec3 duvdist_dy = dFdy(vec3(uv,z));
-
-    dz_duv.x = duvdist_dy.y * duvdist_dx.z;
-    dz_duv.x -= duvdist_dx.y * duvdist_dy.z;
-
-    dz_duv.y = duvdist_dx.x * duvdist_dy.z;
-    dz_duv.y -= duvdist_dy.x * duvdist_dx.z;
-
-    float det = (duvdist_dx.x * duvdist_dy.y) - (duvdist_dx.y * duvdist_dy.x);
-    dz_duv /= det;
-
-    return dz_duv;
-}
-
-float biasedZ(float z0, vec2 dz_duv, vec2 offset)
-{
-    return z0 + dot(dz_duv, offset);
-}
-
-float zClipToEye(float z)
-{
-	#if 1
-		return g_lightZFar * g_lightZNear / (g_lightZFar - z * (g_lightZFar - g_lightZNear));
-	#else
-		return g_lightZNear + z * (g_lightZFar - g_lightZNear);
-	#endif
-}
-
-
-// Performs PCF filtering on the shadow map using multiple taps in the filter region.
-float pcfFilter(vec2 uv, float z0, mat2 rRotMat, vec2 dz_duv, vec2 filterRadiusUV)
-{
-	float sum = 0.0;
-	for (int i = 0; i < PCF_SAMPLES; ++i)
-	{
-		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterRadiusUV;
-		float z = biasedZ(z0, dz_duv, offset);
-		sum += texture( shadowTex, vec3(uv + offset, z) );
-	}
-	return sum / PCF_SAMPLES;
-}
-
-// Returns average blocker depth in the search region, as well as the number of found blockers.
-// Blockers are defined as shadow-map samples between the surface point and the light.
-void findBlocker(
-    out float accumBlockerDepth,
-    out float numBlockers,
-    vec2 uv,
-    float z0,
-	mat2 rRotMat,
-    vec2 dz_duv,
-    vec2 searchRegionRadiusUV)
-{
-    accumBlockerDepth = 0.0;
-    numBlockers = 0.0;
-
-	vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
-
-	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; ++i)
-	{
-		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * searchRegionRadiusUV;
-		float shadowMapDepth = SampleShadowTexDepth(uv + offset, shadowTexSize);
-		float z = biasedZ(z0, dz_duv, offset);
-		if (shadowMapDepth < z)
-		{
-			accumBlockerDepth += shadowMapDepth;
-			numBlockers++;
-		}
-	}
-}
-
-float pcssShadow(vec2 uv, float z, vec2 dz_duv, float zEye, vec2 shadowScaleFactor)
-{
-
-    // ------------------------
-    // STEP 0: Random rotation matrix
-    // ------------------------
-	float rndRotAngle = hash12S(uv) * M_PI2;
-	vec2 rSinCos = vec2(sin(rndRotAngle), cos(rndRotAngle));
-	mat2 rRotMat = mat2(rSinCos.y, -rSinCos.x, rSinCos.x, rSinCos.y);
-
-
-    // ------------------------
-    // STEP 1: blocker search
-    // ------------------------
-    float accumBlockerDepth, numBlockers;
-    vec2 searchRegionRadiusUV = searchRegionRadiusUV(zEye) * shadowScaleFactor;
-    findBlocker(accumBlockerDepth, numBlockers, uv, z, rRotMat, dz_duv, searchRegionRadiusUV);
-
-    // Early out if not in the penumbra
-    if (numBlockers == 0.0)
-        return 1.0;
-
-    // ------------------------
-    // STEP 2: penumbra size
-    // ------------------------
-    float avgBlockerDepth = accumBlockerDepth / numBlockers;
-    float avgBlockerDepthWorld = zClipToEye(avgBlockerDepth);
-    vec2 penumbraRadius = penumbraRadiusUV(zEye, avgBlockerDepthWorld);
-    vec2 filterRadius = projectToLightUV(penumbraRadius, zEye) * shadowScaleFactor;
-
-    // ------------------------
-    // STEP 3: filtering
-    // ------------------------
-    return pcfFilter(uv, z, rRotMat, dz_duv, filterRadius);
 }
 
 float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor, vec2 dZduv) {
@@ -1150,7 +1016,7 @@ void main() {
 	// TODO: move these three to Vertex Shader?
 	vec3 V = normalize(fromVS.viewDir);	// Vector from surface point to camera
 	// TODO: figure out if normalize is required
-	vec3 L = normalize(lightDir.xyz);	// Vector from surface point to light
+	vec3 L = normalize(lightDir);	// Vector from surface point to light
 	vec3 H = normalize(L + V);			// Half vector between both l and v
 
 	gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -1208,7 +1074,7 @@ void main() {
 		shCoordBiased.z -= GetDepthBiasSimple(NdotL);
 
 		vec2 dZduv = GetDepthGradient(fromVS.shadowTexCoord.xyz);
-
+/*
 		const float eps = 1e-6;
 		vec2 dShTdx = max( abs(dFdx(fromVS.shadowTexCoord.xy)), eps );
 		vec2 dShTdy = max( abs(dFdy(fromVS.shadowTexCoord.xy)), eps );
@@ -1218,7 +1084,7 @@ void main() {
 
 		vec2 shadowViewScaleVec = vec2( length(dShVdx) / length(dShTdx), length(dShVdy) / length(dShTdy) ) * mapTexGen;
 		vec2 shadowScaleFactor = 1.0 / max( shadowViewScaleVec, eps );
-
+*/
 		//gl_FragColor.rgb = vec3(length(shadowScaleFactor) > 2.0);
 		//return;
 
@@ -1235,13 +1101,7 @@ void main() {
 			#if 0
 				shadowG = GetShadowPCFGrid(shCoordBiased);
 			#else
-				//shadowG = GetShadowPCSS(shCoordBiased, lightProjScale, dZduv);
-				//vec2 dz_duv = depthGradient(shCoordBiased.xy, shCoordBiased.z);
-				//dz_duv = vec2(0.0);
-				//float zEye = -fromVS.shadowViewCoords.z;
-				shadowG = pcssShadow(shCoordBiased.xy, shCoordBiased.z, dz_duv, zEye, shadowScaleFactor);
-				//shadowG = pcssShadow(shCoordBiased.xy, shCoordBiased.z, dz_duv, zEye, vec2(1.0));
-
+				shadowG = GetShadowPCSS(shCoordBiased, lightProjScale, dZduv);
 			#endif
 		#endif
 	#endif

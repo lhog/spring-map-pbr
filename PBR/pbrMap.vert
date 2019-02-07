@@ -4,7 +4,7 @@
 ###CUSTOM_DEFINITIONS###
 
 uniform ivec2 texSquare;
-uniform vec4 lightDir;       // mapInfo->light.sunDir
+uniform vec3 lightDir;       // mapInfo->light.sunDir
 uniform mat4 lightViewMat;
 
 uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2

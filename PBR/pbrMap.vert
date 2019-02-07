@@ -14,7 +14,6 @@ uniform vec2 mapTexGen; // 1.0/mapSize
 #endif
 #if (HAVE_SHADOWS == 1)
 	uniform mat4 shadowMat;
-	uniform vec4 shadowParams;
 #endif
 
 
@@ -54,14 +53,8 @@ void main() {
 	shadowViewCoords = lightViewMat * vertexWorldPos;
 
 #if (HAVE_SHADOWS == 1)
-	//invShadowMat = inverse(shadowMat);
 	shadowTexCoord = shadowMat * vertexWorldPos;
-	#if 1
-		shadowTexCoord.xy = shadowTexCoord.xy + 0.5;
-	#else
-		shadowTexCoord.xy *= (inversesqrt(abs(shadowTexCoord.xy) + shadowParams.zz) + shadowParams.ww);
-		shadowTexCoord.xy += shadowParams.xy;
-	#endif
+	shadowTexCoord.xy = shadowTexCoord.xy + 0.5;
 #endif
 
 	// transform vertex pos

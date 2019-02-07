@@ -479,7 +479,7 @@ local function GetLookAtMatrix(eye, center, upOrRoll)
 
 	local zaxis = normalize3({ x = center.x - eye.x, y = center.y - eye.y, z = center.z - eye.z})
 	local xaxis = normalize3(crossProduct3(zaxis, upOrRoll))
-	local yaxis = crossProduct3(xaxis, zaxis)
+	local yaxis = normalize3(crossProduct3(xaxis, zaxis))
 
 	local m00, m01, m02, m03 = xaxis.x, yaxis.x, zaxis.x, 0.0
 	local m10, m11, m12, m13 = xaxis.y, yaxis.y, zaxis.y, 0.0
@@ -505,6 +505,8 @@ local updateSunPos = false
 
 local genBrdfLut = nil
 local boundTexUnits = nil
+
+local lightViewMat = nil
 -- /Gadget Global Vars/ --
 
 function gadget:Initialize()
@@ -592,6 +594,11 @@ function gadget:UnsyncedHeightMapUpdate()
 	updateHeights = true
 end
 
+local function PrettyPrintMatrix(mat)
+	return string.format("{{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f}}", mat[1], mat[2], mat[3], mat[4], mat[5], mat[6], mat[7], mat[8], mat[9], mat[10], mat[11], mat[12], mat[13], mat[14], mat[15], mat[16])
+end
+
+local SHADOW_CAMERA_ID = 2
 local function UpdateSomeUniforms()
 	if firstTime then
 		genBrdfLut:Execute()
@@ -606,13 +613,18 @@ local function UpdateSomeUniforms()
 		end
 
 		if updateSunPos then
-			--Spring.Echo("updateSunPos", Spring.GetGameFrame())
-			local lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, {x = 0.0, y = 0.0, z = 0.0}, 0.0)
-			--Spring.Echo("lightViewMat", unpack(lightViewMat))
+			--Spring.Echo("lightDir", unpack(cachedSunPos))
+			lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, {x = 0.0, y = 0.0, z = 0.0}, 0.0)
+			--Spring.Echo("lightViewMat", PrettyPrintMatrix(lightViewMat))
 			fwdShaderObj:SetUniformMatrixAlways("lightViewMat", unpack(lightViewMat))
 
 			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3], 0.0)
 		end
+
+		local lightProjNear, lightProjFar = gl.GetViewRange(SHADOW_CAMERA_ID)
+		--Spring.Echo("gl.GetViewRange(SHADOW_CAMERA_ID)", lightProjNear, lightProjFar)
+		fwdShaderObj:SetUniformFloat("g_lightZNear", lightProjNear)
+		fwdShaderObj:SetUniformFloat("g_lightZFar", lightProjFar)
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
 		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)
@@ -657,9 +669,18 @@ end
 function gadget:DrawWorldShadow()
 	--Spring.Echo("gadget:DrawWorldShadow()")
 	fwdShaderObj:ActivateWith( function()
-		--Spring.Echo("shadowMat", gl.GetMatrixData("shadow"))
-		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
-		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
+		local shadowMat = { gl.GetMatrixData("shadow") }
+		--Spring.Echo("shadowMat", PrettyPrintMatrix(shadowMat))
+		fwdShaderObj:SetUniformMatrixAlways("shadowMat", unpack(shadowMat))
+
+		if lightViewMat then
+			--local scaleX, scaleY, scaleZ = lightViewMat[1] / shadowMat[1], lightViewMat[6] / shadowMat[6], lightViewMat[11] / shadowMat[11]
+			local scaleX, scaleY, scaleZ = shadowMat[1] / lightViewMat[1], shadowMat[6] / lightViewMat[6], shadowMat[11] / lightViewMat[11]
+			scaleX = scaleX * Game.mapSizeX
+			scaleY = scaleY * Game.mapSizeZ
+			fwdShaderObj:SetUniformFloat("lightProjScale", scaleX, scaleY)
+			Spring.Echo("lightProjScale", scaleX, scaleY)
+		end
 	end)
 
 end

@@ -453,21 +453,6 @@ struct VectorDotsInfo {
 // Shadow Mapping Stuff
 #if (HAVE_SHADOWS == 1)
 
-vec2 GetDepthGradient(vec3 shadowCoords) {
-    vec2 dZduv = vec2(0.0, 0.0);
-
-    vec3 dUVdx = dFdx(shadowCoords);
-    vec3 dUVdy = dFdy(shadowCoords);
-
-    dZduv.x = dUVdy.y * dUVdx.z - dUVdx.y * dUVdy.z;
-    dZduv.y = dUVdx.x * dUVdy.z - dUVdy.x * dUVdx.z;
-
-    float det = (dUVdx.x * dUVdy.y) - (dUVdx.y * dUVdy.x);
-    dZduv /= det;
-
-    return dZduv;
-}
-
 float GetDepthBiasSimple(float NdotL) {
 	NdotL = clamp(NdotL, 0.0, 1.0);
 	const float cb = 0.00005;
@@ -493,19 +478,18 @@ float SampleShadowTexDepth(vec2 shadowCoords, vec2 shadowTexSize) {
 	return mix(1.1, texelFetch(shadowTexDepth, shadowTexTexel, 0).r, valid);
 }
 
-float GetShadowRandomDisk(vec3 shadowCoords, mat2 rotMat, vec2 filterSize, vec2 dZduv) {
+float GetShadowRandomDisk(vec3 shadowCoords, mat2 rotMat, vec2 filterSize) {
 	float shadow = 0.0;
 	for (int i = 0; i < PCF_SAMPLES; i++) {
 		vec2 offset = (rotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterSize;
-		float gradBias = dot(offset, dZduv);
 
-		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, gradBias);
+		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, 0.0);
 		shadow += texture( shadowTex, shadowSamplingCoords );
 	}
 	return shadow / float(PCF_SAMPLES);
 }
 
-float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor, vec2 dZduv) {
+float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor) {
 	#if 1
 	if (any(bvec2(shadowCoordsBiased.z > 1.0, shadowCoordsBiased.z < 0.0))) { //not sure if needed
 		return 1.0;
@@ -525,13 +509,12 @@ float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor, vec2 dZduv)
 
 	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; ++i) {
 		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize * shadowScaleFactor;
-		float gradBias = dot(offset, dZduv);
 
 		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + offset;
 		float z = SampleShadowTexDepth(shadowSamplingCoords, shadowTexSize);
 
 		#if 0
-		if (z < shadowCoordsBiased.z + gradBias) {
+		if (z < shadowCoordsBiased.z) {
 			avgBlockerDepth += z;
 			numBlocker++;
 		}
@@ -562,7 +545,7 @@ float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor, vec2 dZduv)
 
 	vec2 filterSize = penumbraRatio * uvLightSize * shadowScaleFactor;
 
-	float shadow = GetShadowRandomDisk(shadowCoordsBiased.xyz, rRotMat, filterSize, dZduv);
+	float shadow = GetShadowRandomDisk(shadowCoordsBiased.xyz, rRotMat, filterSize);
 
 	//shadow = mix(shadow, 1.0, penumbraRatio * 0.1);
 	return mix(1.0, shadow, groundShadowDensity);
@@ -1073,7 +1056,6 @@ void main() {
 		vec4 shCoordBiased = fromVS.shadowTexCoord;
 		shCoordBiased.z -= GetDepthBiasSimple(NdotL);
 
-		vec2 dZduv = GetDepthGradient(fromVS.shadowTexCoord.xyz);
 /*
 		const float eps = 1e-6;
 		vec2 dShTdx = max( abs(dFdx(fromVS.shadowTexCoord.xy)), eps );
@@ -1094,14 +1076,14 @@ void main() {
 				#if 0
 					shadowG = GetShadowPCFGrid(shCoordBiased);
 				#else
-					shadowG = GetShadowPCSS(shCoordBiased, shadowScaleFactor, dZduv);
+					shadowG = GetShadowPCSS(shCoordBiased, shadowScaleFactor);
 				#endif
 			}
 		#else
 			#if 0
 				shadowG = GetShadowPCFGrid(shCoordBiased);
 			#else
-				shadowG = GetShadowPCSS(shCoordBiased, lightProjScale, dZduv);
+				shadowG = GetShadowPCSS(shCoordBiased, lightProjScale);
 			#endif
 		#endif
 	#endif

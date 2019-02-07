@@ -667,12 +667,11 @@ function gadget:DrawWorldShadow()
 		fwdShaderObj:SetUniformMatrixAlways("shadowMat", unpack(shadowMat))
 
 		if lightViewMat then
-			--local scaleX, scaleY, scaleZ = lightViewMat[1] / shadowMat[1], lightViewMat[6] / shadowMat[6], lightViewMat[11] / shadowMat[11]
-			local scaleX, scaleY, scaleZ = shadowMat[1] / lightViewMat[1], shadowMat[6] / lightViewMat[6], shadowMat[11] / lightViewMat[11]
+			local scaleX, scaleY = shadowMat[1] / lightViewMat[1], shadowMat[6] / lightViewMat[6]
 			scaleX = scaleX * Game.mapSizeX
 			scaleY = scaleY * Game.mapSizeZ
 			fwdShaderObj:SetUniformFloat("lightProjScale", scaleX, scaleY)
-			Spring.Echo("lightProjScale", scaleX, scaleY)
+			--Spring.Echo("lightProjScale", scaleX, scaleY)
 		end
 	end)
 

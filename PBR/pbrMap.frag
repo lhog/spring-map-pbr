@@ -1012,7 +1012,6 @@ void main() {
 		clamp(dot(V, H), 0.0, 1.0)		//vdi.VdotH
 	);
 
-	float shadowMix = 0.0;
 	float shadowN = 0.0;
 
 	vec3 emissionColor = vec3(0.0);
@@ -1041,8 +1040,8 @@ void main() {
 			vdi.NdotV = clamp(abs(dot(N, V)), 0.001, 1.0);
 			vdi.NdotH = clamp(dot(N, H), 0.0, 1.0);
 
-			shadowMix = max(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
-			shadowN = max(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
+			float shadowMix = smoothstep(0.0, 0.5, NdotLu);
+			shadowN += mix(1.0, shadowMix, groundShadowDensity) * material[i].weight;
 
 			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
 			emissionColor += material[i].emissionColor * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
@@ -1056,46 +1055,15 @@ void main() {
 		vec4 shCoordBiased = fromVS.shadowTexCoord;
 		shCoordBiased.z -= GetDepthBiasSimple(NdotL);
 
-/*
-		const float eps = 1e-6;
-		vec2 dShTdx = max( abs(dFdx(fromVS.shadowTexCoord.xy)), eps );
-		vec2 dShTdy = max( abs(dFdy(fromVS.shadowTexCoord.xy)), eps );
-
-		vec2 dShVdx = abs(dFdx(fromVS.shadowViewCoords.xy));
-		vec2 dShVdy = abs(dFdy(fromVS.shadowViewCoords.xy));
-
-		vec2 shadowViewScaleVec = vec2( length(dShVdx) / length(dShTdx), length(dShVdy) / length(dShTdy) ) * mapTexGen;
-		vec2 shadowScaleFactor = 1.0 / max( shadowViewScaleVec, eps );
-*/
-		//gl_FragColor.rgb = vec3(length(shadowScaleFactor) > 2.0);
-		//return;
-
-		// TODO: figure out performance implications of conditional
 		#if 0
-			if (NdotL > 0.0) {
-				#if 0
-					shadowG = GetShadowPCFGrid(shCoordBiased);
-				#else
-					shadowG = GetShadowPCSS(shCoordBiased, shadowScaleFactor);
-				#endif
-			}
+			shadowG = GetShadowPCFGrid(shCoordBiased);
 		#else
-			#if 0
-				shadowG = GetShadowPCFGrid(shCoordBiased);
-			#else
-				shadowG = GetShadowPCSS(shCoordBiased, lightProjScale);
-			#endif
+			shadowG = GetShadowPCSS(shCoordBiased, lightProjScale);
 		#endif
 	#endif
 
-	//vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
-	//float z = SampleShadowTexDepth(fromVS.shadowTexCoord.xy, shadowTexSize);
+	float shadow = min(shadowN, shadowG);
 
-	//gl_FragColor.rgb = vec3(fromVS.shadowTexCoord.z - z);
-	gl_FragColor.rgb = vec3(shadowG);
-	return;
-
-	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;
 	gl_FragColor.rgb += emissionColor;
 

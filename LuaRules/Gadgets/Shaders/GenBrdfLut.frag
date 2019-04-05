@@ -7,7 +7,7 @@ uniform vec2 texSize;
 
 //https://www.shadertoy.com/view/4djSRW
 // Hash without Sine
-#define HASHSCALE1 .1031
+#define HASHSCALE1 443.8975
 
 //----------------------------------------------------------------------------------------
 //  1 out, 2 in...
@@ -52,7 +52,7 @@ vec3 importanceSample_GGX(vec2 Xi, float roughness, vec3 normal) {
 	return normalize(tangentX * H.x + tangentY * H.y + normal * H.z);
 }
 
-#define G_OPTION 3
+#define G_OPTION ###G_OPTION###
 
 // Geometric Shadowing function
 float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness) {

@@ -14,8 +14,7 @@ if (gadgetHandler:IsSyncedCode()) then
 	return
 end
 
-local LuaShader = VFS.Include("libs/lsg/LuaShader.lua")
-local GenBRDFLUT = VFS.Include("PBR/GenBrdfLut.lua")
+local LuaShader = VFS.Include("LuaRules/Gadgets/Include/LuaShader.lua")
 
 local function GetNextPowerOf2(tbl)
 	local npot = {}
@@ -445,20 +444,67 @@ local function ParseEverything()
 	return samplerUniformsCode, splatsCode, splatsWeightHeightCode, customDefinitions, pbrMap.customCode, splatCount, boundTexUnits
 end
 
+local function normalize3(a)
+	local x, y, z = a.x or 0, a.y or 0, a.z or 0
+	local N = x * x +  y * y + z * z
+	N = math.sqrt(N)
+	return {x = x / N, y = y / N, z = z / N}
+end
 
+local function crossProduct3(a, b)
+	local x, y, z
+	x = a.y * b.z - a.z * b.y
+	y = a.z * b.x - a.x * b.z
+	z = a.x * b.y - a.y * b.x
+	return { x = x, y = y, z = z }
+end
+
+local function dotProduct3(a, b)
+	return a.x * b.x + a.y * b.y + a.z * b.z
+end
+
+local function GetLookAtMatrix(eye, center, upOrRoll)
+	eye.x = eye.x or 0
+	eye.y = eye.y or 0
+	eye.z = eye.z or 0
+
+	center = center or {}
+	center.x = center.x or 0
+	center.y = center.y or 0
+	center.z = center.z or 0
+
+	if type(upOrRoll) == "number" then
+		upOrRoll = {x = math.sin(upOrRoll), y = math.cos(upOrRoll), z = 0.0}
+	end
+
+	local zaxis = normalize3({ x = center.x - eye.x, y = center.y - eye.y, z = center.z - eye.z})
+	local xaxis = normalize3(crossProduct3(zaxis, upOrRoll))
+	local yaxis = normalize3(crossProduct3(xaxis, zaxis))
+
+	local m00, m01, m02, m03 = xaxis.x, yaxis.x, zaxis.x, 0.0
+	local m10, m11, m12, m13 = xaxis.y, yaxis.y, zaxis.y, 0.0
+	local m20, m21, m22, m23 = xaxis.z, yaxis.z, zaxis.z, 0.0
+
+	local m30, m31, m32, m33 = -dotProduct3(xaxis, eye), -dotProduct3(yaxis, eye), -dotProduct3(zaxis, eye), 1.0
+
+	return {m00, m01, m02, m03,
+			m10, m11, m12, m13,
+			m20, m21, m22, m23,
+			m30, m31, m32, m33}
+end
 
 --  Gadget Global Vars  --
 local fwdShaderObjValid = false
 local fwdShaderObj = nil
 
-local firstTime = true
 local updateHeights = true
 
-local oldSunPos = {-1, -1, -1}
+local cachedSunPos = {-1, -1, -1}
 local updateSunPos = false
 
-local genBrdfLut = nil
 local boundTexUnits = nil
+
+local lightViewMat = nil
 -- /Gadget Global Vars/ --
 
 function gadget:Initialize()
@@ -476,6 +522,7 @@ function gadget:Initialize()
 	boundSamplers["diffuseTex"] = 0
 
 	boundSamplers["shadowTex"] = 27
+	boundSamplers["shadowTexDepth"] = 27
 	boundSamplers["infoTex"] = 28
 	boundSamplers["terrainNormalsTex"] = 29
 	boundSamplers["reflectionTex"] = 30
@@ -496,10 +543,6 @@ function gadget:Initialize()
 	end
 
 	uniformsFloat["groundShadowDensity"] = gl.GetSun("shadowDensity")
-
-	local BRDFLUT_TEXDIM = 512 --512 is BRDF LUT texture size
-	genBrdfLut = GenBRDFLUT(BRDFLUT_TEXDIM)
-	genBrdfLut:Initialize()
 
 	local vertCodeTmpl = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
 	local fragCodeTmpl = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
@@ -535,10 +578,9 @@ end
 
 function gadget:Update(dt)
 	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
-	if (newSunX ~= oldSunPos[1] or newSunY ~= oldSunPos[2] or newSunZ ~= oldSunPos[3]) then
-		--Spring.Echo("updateSunPos", newSunX, newSunY, newSunZ)
-		oldSunPos = { newSunX, newSunY, newSunZ }
-		updateSunPos = true
+	updateSunPos = (newSunX ~= cachedSunPos[1] or newSunY ~= cachedSunPos[2] or newSunZ ~= cachedSunPos[3])
+	if updateSunPos then
+		cachedSunPos = { newSunX, newSunY, newSunZ }
 	end
 end
 
@@ -546,18 +588,11 @@ function gadget:UnsyncedHeightMapUpdate()
 	updateHeights = true
 end
 
+local function PrettyPrintMatrix(mat)
+	return string.format("{{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f},{%f,%f,%f,%f}}", mat[1], mat[2], mat[3], mat[4], mat[5], mat[6], mat[7], mat[8], mat[9], mat[10], mat[11], mat[12], mat[13], mat[14], mat[15], mat[16])
+end
 
 local function UpdateSomeUniforms()
-	if firstTime then
-		--genBrdfLut:Execute(true)
-		gl.PushPopMatrix(function()
-			gl.MatrixMode(GL.PROJECTION); gl.LoadIdentity();
-			gl.MatrixMode(GL.MODELVIEW); gl.LoadIdentity();
-			genBrdfLut:Execute(false)
-		end)
-		firstTime = false
-	end
-
 	fwdShaderObj:ActivateWith( function()
 
 		if updateHeights then
@@ -566,14 +601,15 @@ local function UpdateSomeUniforms()
 		end
 
 		if updateSunPos then
-			local sunPosX, sunPosY, sunPosZ = gl.GetSun("pos")
-			fwdShaderObj:SetUniformFloatAlways("lightDir", sunPosX, sunPosY, sunPosZ, 0.0)
-			Spring.Echo("sunPos", sunPosX, sunPosY, sunPosZ)
-			updateSunPos = false
+			lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, nil, 0.0)
+			fwdShaderObj:SetUniformMatrixAlways("lightViewMat", unpack(lightViewMat))
+
+			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3])
 		end
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
 		fwdShaderObj:SetUniformFloat("infoTexIntensityMul", ((drawMode == "metal") and 1.0 or 0.0) + 1.0)
+
 		--local gf = Spring.GetGameFrame()
 		--fwdShaderObj:SetUniformFloat("gameFrame", gf)
 	end)
@@ -611,24 +647,30 @@ function gadget:GotChatMsg(msg, player)
 	end
 end
 
-
 function gadget:DrawWorldShadow()
 	--Spring.Echo("gadget:DrawWorldShadow()")
 	fwdShaderObj:ActivateWith( function()
-		fwdShaderObj:SetUniformMatrixAlways("shadowMat", gl.GetMatrixData("shadow"))
-		fwdShaderObj:SetUniformFloat("shadowParams", gl.GetShadowMapParams())
+		local shadowMat = { gl.GetMatrixData("shadow") }
+		--Spring.Echo("shadowMat", PrettyPrintMatrix(shadowMat))
+		fwdShaderObj:SetUniformMatrixAlways("shadowMat", unpack(shadowMat))
+
+		if lightViewMat then
+			local scaleX, scaleY = shadowMat[1] / lightViewMat[1], shadowMat[6] / lightViewMat[6]
+			scaleX = scaleX * Game.mapSizeX
+			scaleY = scaleY * Game.mapSizeZ
+			fwdShaderObj:SetUniformFloat("lightProjScale", scaleX, scaleY)
+			--Spring.Echo("lightProjScale", scaleX, scaleY)
+		end
 	end)
 
 end
 
-
 local function BindTextures()
-
 	gl.Texture(27, "$shadow")
 	gl.Texture(28, "$info")
 	gl.Texture(29, "$normals")
 	gl.Texture(30, "$reflection")
-	gl.Texture(31, genBrdfLut:GetTexture())
+	gl.Texture(31, GG.GetBrdfTexture())
 
 	if boundTexUnits then
 		for tun, def in pairs(boundTexUnits) do
@@ -649,10 +691,7 @@ function gadget:DrawGroundPreForward()
 	end
 end
 
-
-
 function gadget:Shutdown()
-	genBrdfLut:Finalize()
 	if fwdShaderObjValid then
 		fwdShaderObj:Finalize()
 		Spring.SetMapShader(0, 0)

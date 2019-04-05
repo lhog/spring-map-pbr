@@ -21,14 +21,13 @@
 const float SMF_SHALLOW_WATER_DEPTH     = 10.0;
 const float SMF_SHALLOW_WATER_DEPTH_INV = 1.0 / SMF_SHALLOW_WATER_DEPTH;
 
-const float M_PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062;
+const float M_PI = 3.14159265359;
 const float M_PI2 = M_PI * 2.0;
 
 const float MIN_ROUGHNESS = 0.04;
 const float MIN_SPECULAR_F0 = 0.0001;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-
 
 /***********************************************************************/
 // Samplers
@@ -42,10 +41,12 @@ uniform samplerCube reflectionTex;
 #define tex(num) tex##num
 
 // Uniforms
-uniform vec2 normalTexGen;   // either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
-uniform vec2 mapTexGen; // 1.0/mapSize
+uniform vec2 normalTexGen;	// either 1.0/mapSize (when NPOT are supported) or 1.0/mapSizePO2
+uniform vec2 mapTexGen;		// 1.0/mapSize
 
-uniform vec4 lightDir;
+uniform vec3 lightDir;		// mapInfo->light.sunDir
+uniform mat4 lightViewMat;
+
 uniform vec3 lightColor = SUN_COLOR;
 
 uniform float groundShadowDensity; //useful for NdotL shading as well, so keep it unconditional
@@ -59,7 +60,9 @@ uniform float gameFrame;
 #endif
 
 #if (HAVE_SHADOWS == 1)
+	uniform vec2 lightProjScale; //[0, 1] ?
 	uniform sampler2DShadow shadowTex;
+	uniform sampler2D shadowTexDepth; //only usable with texelFetch, see https://www.opengl.org/discussion_boards/showthread.php/200048-Can-you-use-sampler2D-and-sampler2DShadow-on-the-same-texture
 #endif
 
 #ifdef SMF_WATER_ABSORPTION
@@ -76,10 +79,12 @@ in Data {
 	vec2 diffuseTexCoords;
 	vec2 normalTexCoords;
 	vec2 mapTexCoords;
+	//float viewDistance;
 #if (HAVE_INFOTEX == 1)
 	vec2 infoTexCoords;
 #endif
 #if (HAVE_SHADOWS == 1)
+	vec4 shadowViewCoords;
 	vec4 shadowTexCoord;
 #endif
 	float fogFactor;
@@ -90,7 +95,18 @@ in Data {
 
 ###CUSTOM_CODE###
 
-#line 10091
+#line 10099
+
+/***********************************************************************/
+// Hash functions
+
+// For smaller input rangers like audio tick or 0-1 UVs use these...
+float hash12S(vec2 p) {
+	const float HASHSCALE1 = 443.8975;
+	vec3 p3  = fract(vec3(p.xyx) * HASHSCALE1);
+    p3 += dot(p3, p3.yzx + 19.19);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 /***********************************************************************/
 // Gamma forward and inverse correction procedures
@@ -285,6 +301,7 @@ vec3 expExpand(in vec3 x, in float cutoff, in float mul) {
 
 #define DITHER DITHER_ANIMATED
 
+//a.k.a InterleavedGradientNoise()
 vec3 Dither1(vec3 input) {
 	//vec2 seed = gl_FragCoord.xy;
 	vec2 seed = gl_FragCoord.xy * 200.0;
@@ -339,6 +356,72 @@ vec3 Dither3(vec3 input) {
 }
 
 /***********************************************************************/
+// Various transformations
+
+#define NORM2SNORM(value) (value * 2.0 - 1.0)
+#define SNORM2NORM(value) (value * 0.5 + 0.5)
+#define DISK2D(xy) (xy * sqrt( 1.0 - 0.5 * xy * xy ).yx)
+
+// Lame way...
+#define DISKLIN_FACTOR 2.0
+#define DISKLIN(xy) (xy * (length(xy) + DISKLIN_FACTOR) / (1.0 + DISKLIN_FACTOR))
+
+
+/***********************************************************************/
+// Low discrepancy sampling methods
+
+// vec2([0, 1])
+vec2 HammersleyNorm(int i, int N) {
+    // principle: reverse bit sequence of i
+	uint b =  ( uint(i) << 16u) | (uint(i) >> 16u );
+	b = (b & 0x55555555u) << 1u | (b & 0xAAAAAAAAu) >> 1u;
+	b = (b & 0x33333333u) << 2u | (b & 0xCCCCCCCCu) >> 2u;
+	b = (b & 0x0F0F0F0Fu) << 4u | (b & 0xF0F0F0F0u) >> 4u;
+	b = (b & 0x00FF00FFu) << 8u | (b & 0xFF00FF00u) >> 8u;
+
+	return vec2( i, b ) / vec2( N, 0xFFFFFFFFU );
+}
+
+// vec2([0, 1])
+const vec2 p0 = vec2(M_PI/2.0, 0.5);
+vec2 GoldenRatioNorm(int i) {
+    return fract(p0 + vec2(i*12664745, i*9560333)/float(0x1000000));
+}
+
+// Disk vec2([-1, 1])
+//  Normalize N beforehand
+// 	float Nn = round(sqrt(float(N)));
+//	Nn *= Nn;
+
+vec2 ConcentricDisk(int i, int N) {
+    float ringI = floor(sqrt(float(i)));
+    float ringN = floor(sqrt(float(N)));
+
+	float RMul = 1.0 / (float(ringN) - 1.0);
+
+    float RSub = 2.0 * ringI + 1.0;
+
+    float ringS = float(i) - ringI * ringI;
+
+    float R = RMul * ringI;
+    float Phi = ringS / RSub;
+    Phi += 0.25 * ringI / ringN;
+    //Phi += fract(0.5 + ringI * invGR1);
+    Phi *= M_PI2;
+    vec2 res = vec2(cos(Phi), sin(Phi)) * R;
+    return res;
+}
+
+#define HammersleySNorm(i, N) NORM2SNORM(HammersleyNorm(i, N))
+#define HammersleyDisk(i, N) DISK2D(HammersleySNorm(i, N))
+#define HammersleyDiskLin(i, N) DISKLIN(HammersleyDisk(i, N))
+
+#define GoldenRatioSNorm(i) NORM2SNORM(GoldenRatioNorm(i))
+#define GoldenRatioDisk(i) DISK2D(GoldenRatioSNorm(i))
+#define GoldenRatioDiskLin(i) DISKLIN(GoldenRatioDisk(i))
+
+
+/***********************************************************************/
 // Material and vectors struct
 
 struct MaterialInfo {
@@ -370,37 +453,126 @@ struct VectorDotsInfo {
 /***********************************************************************/
 // Shadow Mapping Stuff
 #if (HAVE_SHADOWS == 1)
-float GetShadowCoeff(vec4 shadowCoords, float NdotL) {
+
+float GetDepthBiasSimple(float NdotL) {
 	NdotL = clamp(NdotL, 0.0, 1.0);
 	const float cb = 0.00005;
-	//float bias = cb * tan(acos(NdotL));
-	float bias = cb * sqrt (1.0 - NdotL * NdotL) / NdotL; // same as above, but cheaper!
-	bias = clamp(bias, 0.01 * cb, 5.0 * cb);
 
-	float coeff = 0.0;
+	float bias = cb * sqrt(1.0 - NdotL * NdotL) / NdotL; // tan(acos(NdotL))
+	return clamp(bias, 0.01 * cb, 5.0 * cb);
+}
+
+#define PCSS_BLOCKER_SAMPLES 32
+#define PCF_SAMPLES 64
+
+float SampleShadowTexDepth(vec2 shadowCoords, vec2 shadowTexSize) {
+	const float almostZero = 0.0 + 1e-3;
+	const float almostOne = 1.0 - almostZero;
+	#if 1
+		ivec2 shadowTexTexel = ivec2(round(shadowCoords * shadowTexSize));
+	#else
+		ivec2 shadowTexTexel = ivec2(round(shadowCoords * (shadowTexSize - 1.0) + 0.5));
+	#endif
+	float valid = float( all( greaterThanEqual(shadowCoords, vec2(almostZero)) && lessThanEqual(shadowCoords, vec2(almostOne)) ) );
+
+	// return 1.1 (if valid == 0.0) so shadow is never here at such fragment
+	return mix(1.1, texelFetch(shadowTexDepth, shadowTexTexel, 0).r, valid);
+}
+
+float GetShadowRandomDisk(vec3 shadowCoords, mat2 rotMat, vec2 filterSize) {
+	float shadow = 0.0;
+	for (int i = 0; i < PCF_SAMPLES; i++) {
+		vec2 offset = (rotMat * HammersleyDiskLin(i, PCF_SAMPLES)) * filterSize;
+
+		vec3 shadowSamplingCoords = shadowCoords + vec3(offset, 0.0);
+		shadow += texture( shadowTex, shadowSamplingCoords );
+	}
+	return shadow / float(PCF_SAMPLES);
+}
+
+float GetShadowPCSS(vec4 shadowCoordsBiased, vec2 shadowScaleFactor) {
+	#if 1
+	if (any(bvec2(shadowCoordsBiased.z > 1.0, shadowCoordsBiased.z < 0.0))) { //not sure if needed
+		return 1.0;
+	}
+	#endif
+
+	float rndRotAngle = hash12S(shadowCoordsBiased.xy) * M_PI2;
+	vec2 rSinCos = vec2(sin(rndRotAngle), cos(rndRotAngle));
+	mat2 rRotMat = mat2(rSinCos.y, -rSinCos.x, rSinCos.x, rSinCos.y);
+
+	vec2 shadowTexSize = textureSize(shadowTexDepth, 0);
+
+	const float uvLightSize = 0.001; //TODO: fix me
+
+	float avgBlockerDepth = 0.0;
+	float numBlocker = 0.0;
+
+	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; ++i) {
+		vec2 offset = (rRotMat * HammersleyDiskLin(i, PCSS_BLOCKER_SAMPLES)) * uvLightSize * shadowScaleFactor;
+
+		vec2 shadowSamplingCoords = shadowCoordsBiased.xy + offset;
+		float z = SampleShadowTexDepth(shadowSamplingCoords, shadowTexSize);
+
+		#if 0
+		if (z < shadowCoordsBiased.z) {
+			avgBlockerDepth += z;
+			numBlocker++;
+		}
+		#else
+			float condition = float(z < shadowCoordsBiased.z);
+			avgBlockerDepth += mix(0.0, z, condition); //non-branching if
+			numBlocker += mix(0.0, 1.0, condition); //non-branching if
+		#endif
+	}
+
+	#if 1
+	if (numBlocker < 1.0) { //bail out quickly
+		return 1.0;
+	}
+	#endif
+
+	avgBlockerDepth /= numBlocker;
+
+	#if 1 // NVidia way
+		float penumbraRatio = (shadowCoordsBiased.z - avgBlockerDepth) / avgBlockerDepth;
+
+	#else // Babylon.js way
+		float AAOffset = 10.0 / shadowTexSize.x; // Offset preventing aliasing on contact.
+		float penumbraRatio = ((shadowCoordsBiased.z - avgBlockerDepth) + AAOffset);
+	#endif
+
+	penumbraRatio *= 10.0; //terrible hack, because our sun is too far away...
+
+	vec2 filterSize = penumbraRatio * uvLightSize * shadowScaleFactor;
+
+	float shadow = GetShadowRandomDisk(shadowCoordsBiased.xyz, rRotMat, filterSize);
+
+	//shadow = mix(shadow, 1.0, penumbraRatio * 0.1);
+	return mix(1.0, shadow, groundShadowDensity);
+}
+
+
+
+float GetShadowPCFGrid(vec4 shadowCoords) {
+	float shadow = 0.0;
 
 	#if (SHADOW_SAMPLES == 1)
-		coeff = textureProj( shadowTex, shadowCoords + vec4(0.0, 0.0, bias, 0.0) );
+		shadow = textureProj( shadowTex, shadowCoords );
 	#else
 		const int ssHalf = int(floor(float(SHADOW_SAMPLES)/2.0));
 		const float ssSum = float((ssHalf + 1) * (ssHalf + 1));
-
-		shadowCoords += vec4(0.0, 0.0, -bias, 0.0);
 
 		for( int x = -ssHalf; x <= ssHalf; x++ ) {
 			float wx = float(ssHalf - abs(x) + 1) / ssSum;
 			for( int y = -ssHalf; y <= ssHalf; y++ ) {
 				float wy = float(ssHalf - abs(y) + 1) / ssSum;
-				coeff += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
+				shadow += wx * wy * textureProjOffset ( shadowTex, shadowCoords, ivec2(x, y) );
 			}
 		}
 	#endif
 
-	coeff  = (1.0 - coeff);
-	coeff *= smoothstep(0.1, 1.0, coeff);
-
-	coeff *= groundShadowDensity;
-	return (1.0 - coeff);
+	return mix(1.0, shadow, groundShadowDensity);
 }
 #endif
 
@@ -543,6 +715,11 @@ vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness)
 	}
 #endif
 
+//https://github.com/urho3d/Urho3D/blob/master/bin/CoreData/Shaders/GLSL/IBL.glsl
+float GetMipFromRoughness(float roughness, float lodMax) {
+	return (roughness * (lodMax + 1.0) - pow(roughness, 6.0) * 1.5);
+}
+
 #define PBR_F_SCHLICK_KHRONOS 1
 #define PBR_F_SCHLICK_SASCHA 2
 #define PBR_F_SCHLICK_GOOGLE 3
@@ -610,7 +787,11 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	// Image Based Lighting
 	ivec2 reflectionTexSize = textureSize(reflectionTex, 0);
 	float reflectionTexMaxLOD = log2(float(max(reflectionTexSize.x, reflectionTexSize.y)));
-	float specularLOD = reflectionTexMaxLOD * roughness;
+	#if 0
+		float specularLOD = reflectionTexMaxLOD * roughness;
+	#else
+		float specularLOD = GetMipFromRoughness(roughness, reflectionTexMaxLOD);
+	#endif
 	specularLOD += IBL_SPECULAR_LOD_BIAS;
 
 	#if (IBL_DIFFUSECOLOR_STATIC == 1)
@@ -651,7 +832,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	vec3 iblLitDiffColor = iblDiffuseLight * baseDiffuseColor;
 	vec3 iblLitSpecColor = iblSpecularLight * (baseSpecularColor * brdf.x + brdf.y);
 
-	//return N;
+	//return iblSpecularLight;
 
 	//TODO: figure out which one looks better
 	float occlusion = mix(1.0, groundShadowDensity, 1.0 - mat.occlusion);
@@ -660,7 +841,7 @@ vec3 GetPBR(MaterialInfo mat, VectorDotsInfo vd, vec3 N, vec3 R) {
 	#else
 		return (sunLitDiffColor + sunLitSpecColor) + (iblLitDiffColor + iblLitSpecColor) * occlusion;
 	#endif
-	//return iblLitSpecColor;
+
 }
 
 /***********************************************************************/
@@ -678,12 +859,16 @@ vec3 terrainWorldNormal;
 #define MAT_COUNT ###MATERIALS_COUNT###
 MaterialInfo material[MAT_COUNT];
 
-vec2 flipUV(vec2 uv) {
-	return vec2(uv.x, 1.0 - uv.y);
-}
+#define flipVertically(uv) (vec2(uv.x, 1.0 - uv.y))
 
-#define DXUnpackNormals(xyz) ((2.0 * xyz - 1.0) * vec3(1.0, -1.0, 1.0))
-#define OGLUnpackNormals(xyz) (2.0 * xyz - 1.0)
+#define UnpackNormalsScaled(xyz, scale) (normalize(NORM2SNORM(xyz) * scale))
+#define UnpackNormalsUnscaled(xyz) (normalize(NORM2SNORM(xyz)))
+
+#define OGLUnpackNormals(xyz) UnpackNormalsUnscaled(xyz)
+#define DXUnpackNormals(xyz) UnpackNormalsScaled(xyz, vec3(1.0, -1.0, 1.0))
+
+#define OGLUnpackNormalsScaled(xyz, scale) UnpackNormalsScaled(xyz, scale)
+#define DXUnpackNormalsScaled(xyz, scale) UnpackNormalsScaled(xyz, vec3(1.0, -1.0, 1.0) * scale)
 
 void FillMaterialWeightsHeights() {
 ###MATERIAL_WEIGHTS_HEIGHTS###
@@ -709,7 +894,7 @@ vec3 NormalBlendUnpackedRNM(vec3 n1, vec3 n2) {
     return n1 * dot(n1, n2) / n1.z - n2;
 }
 
-#line 20711
+#line 20973
 
 void main() {
 
@@ -815,7 +1000,7 @@ void main() {
 	// TODO: move these three to Vertex Shader?
 	vec3 V = normalize(fromVS.viewDir);	// Vector from surface point to camera
 	// TODO: figure out if normalize is required
-	vec3 L = normalize(lightDir.xyz);	// Vector from surface point to light
+	vec3 L = normalize(lightDir);	// Vector from surface point to light
 	vec3 H = normalize(L + V);			// Half vector between both l and v
 
 	gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -828,7 +1013,6 @@ void main() {
 		clamp(dot(V, H), 0.0, 1.0)		//vdi.VdotH
 	);
 
-	float shadowMix = 0.0;
 	float shadowN = 0.0;
 
 	vec3 emissionColor = vec3(0.0);
@@ -857,8 +1041,8 @@ void main() {
 			vdi.NdotV = clamp(abs(dot(N, V)), 0.001, 1.0);
 			vdi.NdotH = clamp(dot(N, H), 0.0, 1.0);
 
-			shadowMix = max(shadowMix, smoothstep(0.0, 0.5, NdotLu) * material[i].weight);
-			shadowN = max(shadowN, mix(1.0 - groundShadowDensity, 1.0, shadowMix));
+			float shadowMix = smoothstep(0.0, 0.5, NdotLu);
+			shadowN += mix(1.0, shadowMix, groundShadowDensity) * material[i].weight;
 
 			gl_FragColor.rgb += GetPBR(material[i], vdi, N, R) * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
 			emissionColor += material[i].emissionColor * material[i].weight;// * smoothstep(0.0, WEIGHT_CUTOFF, material[i].weight);
@@ -868,48 +1052,21 @@ void main() {
 	float shadowG = 1.0;
 
 	#if (HAVE_SHADOWS == 1)
-		float NdotL = dot(terrainWorldNormal, L); //too lazy to carry the real NdotL from the prev loop
-		// TODO: figure out performance implications of conditional
+		float NdotL = dot(terrainWorldNormal, L);
+		vec4 shCoordBiased = fromVS.shadowTexCoord;
+		shCoordBiased.z -= GetDepthBiasSimple(NdotL);
+
 		#if 0
-			if (NdotL > 0.0) {
-				shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
-			}
+			shadowG = GetShadowPCFGrid(shCoordBiased);
 		#else
-			shadowG = GetShadowCoeff(fromVS.shadowTexCoord, NdotL);
+			shadowG = GetShadowPCSS(shCoordBiased, lightProjScale);
 		#endif
 	#endif
 
-	//gl_FragColor.rg = vec2(1.0 - shadowN, 1.0 - shadowG);
-	//gl_FragColor.b = 0.0;
-	//return;
+	float shadow = min(shadowN, shadowG);
 
-	float shadow = mix(shadowN, shadowG, shadowMix);
 	gl_FragColor.rgb *= shadow;
-
 	gl_FragColor.rgb += emissionColor;
-
-	//gl_FragColor.rgb = material[0].baseColor;
-	//gl_FragColor.rgb =  BlendNormals(worldTBN * UnpackNormals(material[0].blendNormal));
-	//gl_FragColor.rgb = terrainWorldNormal;
-	//gl_FragColor.rgb = vec3( dot(terrainWorldNormal, H) );
-	//gl_FragColor.rgb = vec3( L );
-
-	//vec3 N = terrainWorldNormal;
-	//vec3 R = -normalize(reflect(V, N));
-	//gl_FragColor.rgb = textureLod(reflectionTex, N, 0.0).rgb;
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -929,4 +1086,3 @@ void main() {
 		gl_FragColor.rgb = OUTPUT_GAMMACORRECTION(gl_FragColor.rgb);
 	#endif
 }
-

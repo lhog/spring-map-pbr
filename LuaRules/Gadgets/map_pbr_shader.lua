@@ -14,8 +14,7 @@ if (gadgetHandler:IsSyncedCode()) then
 	return
 end
 
-local LuaShader = VFS.Include("libs/lsg/LuaShader.lua")
-local GenBRDFLUT = VFS.Include("PBR/GenBrdfLut.lua")
+local LuaShader = VFS.Include("LuaRules/Gadgets/Include/LuaShader.lua")
 
 local function GetNextPowerOf2(tbl)
 	local npot = {}
@@ -498,13 +497,11 @@ end
 local fwdShaderObjValid = false
 local fwdShaderObj = nil
 
-local firstTime = true
 local updateHeights = true
 
 local cachedSunPos = {-1, -1, -1}
 local updateSunPos = false
 
-local genBrdfLut = nil
 local boundTexUnits = nil
 
 local lightViewMat = nil
@@ -546,10 +543,6 @@ function gadget:Initialize()
 	end
 
 	uniformsFloat["groundShadowDensity"] = gl.GetSun("shadowDensity")
-
-	local BRDFLUT_TEXDIM = 512 --512 is BRDF LUT texture size
-	genBrdfLut = GenBRDFLUT(BRDFLUT_TEXDIM)
-	genBrdfLut:Initialize()
 
 	local vertCodeTmpl = VFS.LoadFile("PBR/pbrMap.vert", VFS.MAP)
 	local fragCodeTmpl = VFS.LoadFile("PBR/pbrMap.frag", VFS.MAP)
@@ -600,11 +593,6 @@ local function PrettyPrintMatrix(mat)
 end
 
 local function UpdateSomeUniforms()
-	if firstTime then
-		genBrdfLut:Execute()
-		firstTime = false
-	end
-
 	fwdShaderObj:ActivateWith( function()
 
 		if updateHeights then
@@ -682,7 +670,7 @@ local function BindTextures()
 	gl.Texture(28, "$info")
 	gl.Texture(29, "$normals")
 	gl.Texture(30, "$reflection")
-	gl.Texture(31, genBrdfLut:GetTexture())
+	gl.Texture(31, GG.GetBrdfTexture())
 
 	if boundTexUnits then
 		for tun, def in pairs(boundTexUnits) do
@@ -704,7 +692,6 @@ function gadget:DrawGroundPreForward()
 end
 
 function gadget:Shutdown()
-	genBrdfLut:Finalize()
 	if fwdShaderObjValid then
 		fwdShaderObj:Finalize()
 		Spring.SetMapShader(0, 0)

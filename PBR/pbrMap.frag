@@ -301,6 +301,7 @@ vec3 expExpand(in vec3 x, in float cutoff, in float mul) {
 
 #define DITHER DITHER_ANIMATED
 
+//a.k.a InterleavedGradientNoise()
 vec3 Dither1(vec3 input) {
 	//vec2 seed = gl_FragCoord.xy;
 	vec2 seed = gl_FragCoord.xy * 200.0;
@@ -378,7 +379,7 @@ vec2 HammersleyNorm(int i, int N) {
 	b = (b & 0x0F0F0F0Fu) << 4u | (b & 0xF0F0F0F0u) >> 4u;
 	b = (b & 0x00FF00FFu) << 8u | (b & 0xFF00FF00u) >> 8u;
 
-	return vec2( i, b ) / vec2( N, 0xffffffffU );
+	return vec2( i, b ) / vec2( N, 0xFFFFFFFFU );
 }
 
 // vec2([0, 1])

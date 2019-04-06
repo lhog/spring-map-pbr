@@ -499,8 +499,7 @@ local fwdShaderObj = nil
 
 local updateHeights = true
 
-local cachedSunPos = {-1, -1, -1}
-local updateSunPos = false
+local updateSun = false
 
 local boundTexUnits = nil
 
@@ -574,14 +573,12 @@ function gadget:Initialize()
 	if fwdShaderObjValid then
 		Spring.SetMapShader(fwdShaderObj:GetHandle(), 0)
 	end
+
+	gadget:SunChanged()
 end
 
-function gadget:Update(dt)
-	local newSunX, newSunY, newSunZ = gl.GetSun("pos")
-	updateSunPos = (newSunX ~= cachedSunPos[1] or newSunY ~= cachedSunPos[2] or newSunZ ~= cachedSunPos[3])
-	if updateSunPos then
-		cachedSunPos = { newSunX, newSunY, newSunZ }
-	end
+function gadget:SunChanged()
+	updateSun = true
 end
 
 function gadget:UnsyncedHeightMapUpdate()
@@ -600,11 +597,16 @@ local function UpdateSomeUniforms()
 			updateHeights = false
 		end
 
-		if updateSunPos then
-			lightViewMat = GetLookAtMatrix({x = cachedSunPos[1], y = cachedSunPos[2], z = cachedSunPos[3]}, nil, 0.0)
+		if updateSun then
+			local sunX, sunY, sunZ = gl.GetSun("pos")
+
+			lightViewMat = GetLookAtMatrix({x = sunX, y = sunY, z = sunZ}, nil, 0.0)
 			fwdShaderObj:SetUniformMatrixAlways("lightViewMat", unpack(lightViewMat))
 
-			fwdShaderObj:SetUniformFloatAlways("lightDir", cachedSunPos[1], cachedSunPos[2], cachedSunPos[3])
+			fwdShaderObj:SetUniformFloatAlways("lightDir", sunX, sunY, sunZ)
+
+			local groundShadowDensity = gl.GetSun("shadowDensity")
+			fwdShaderObj:SetUniformFloatAlways("groundShadowDensity", groundShadowDensity)
 		end
 
 		local drawMode = Spring.GetMapDrawMode() or "nil"
